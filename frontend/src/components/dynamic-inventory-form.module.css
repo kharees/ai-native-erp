@@ -1,0 +1,397 @@
+/* =============================================================================
+   dynamic-inventory-form.module.css
+   Premium dark-glassmorphism form design for the AI-Native ERP.
+   ============================================================================= */
+
+/* --------------------------------------------------------------------------
+   Design Tokens
+   -------------------------------------------------------------------------- */
+.root {
+  --erp-bg:          #0a0a0f;
+  --erp-surface:     #111118;
+  --erp-surface-2:   #1a1a28;
+  --erp-surface-3:   #22223a;
+  --erp-border:      rgba(255, 255, 255, 0.07);
+  --erp-border-focus:rgba(139, 92, 246, 0.6);
+  --erp-text-1:      #f0f0ff;
+  --erp-text-2:      #9898b8;
+  --erp-text-3:      #5a5a80;
+  --erp-accent:      #8b5cf6;
+  --erp-accent-glow: rgba(139, 92, 246, 0.25);
+  --erp-mfg:         #f59e0b;
+  --erp-mfg-glow:    rgba(245, 158, 11, 0.2);
+  --erp-retail:      #8b5cf6;
+  --erp-retail-glow: rgba(139, 92, 246, 0.2);
+  --erp-svc:         #06b6d4;
+  --erp-svc-glow:    rgba(6, 182, 212, 0.2);
+  --erp-error:       #f43f5e;
+  --erp-success:     #10b981;
+  --erp-radius:      12px;
+  --erp-radius-sm:   8px;
+  --erp-transition:  0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --------------------------------------------------------------------------
+   Form Card
+   -------------------------------------------------------------------------- */
+.formCard {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 20px;
+  padding: 36px;
+  position: relative;
+  overflow: hidden;
+}
+
+.formCard::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   Section Groups
+   -------------------------------------------------------------------------- */
+.section {
+  margin-bottom: 32px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--erp-text-3);
+  margin: 0 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionTitle::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--erp-border);
+}
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid1 { display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+@media (max-width: 700px) {
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .formCard { padding: 24px 20px; }
+}
+
+/* --------------------------------------------------------------------------
+   Template Selector Cards
+   -------------------------------------------------------------------------- */
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+@media (max-width: 700px) {
+  .templateGrid { grid-template-columns: 1fr; }
+}
+
+.templateCard {
+  position: relative;
+  background: var(--erp-surface-2);
+  border: 1.5px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 18px 16px;
+  cursor: pointer;
+  transition:
+    border-color var(--erp-transition),
+    background var(--erp-transition),
+    box-shadow var(--erp-transition),
+    transform var(--erp-transition);
+  user-select: none;
+  overflow: hidden;
+}
+
+.templateCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.templateCard.activeMfg {
+  border-color: var(--erp-mfg);
+  background: rgba(245, 158, 11, 0.07);
+  box-shadow: 0 0 20px var(--erp-mfg-glow), inset 0 1px 0 rgba(245, 158, 11, 0.15);
+}
+
+.templateCard.activeRetail {
+  border-color: var(--erp-retail);
+  background: rgba(139, 92, 246, 0.07);
+  box-shadow: 0 0 20px var(--erp-retail-glow), inset 0 1px 0 rgba(139, 92, 246, 0.15);
+}
+
+.templateCard.activeSvc {
+  border-color: var(--erp-svc);
+  background: rgba(6, 182, 212, 0.07);
+  box-shadow: 0 0 20px var(--erp-svc-glow), inset 0 1px 0 rgba(6, 182, 212, 0.15);
+}
+
+.templateIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+
+.templateLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--erp-text-1);
+  margin: 0 0 4px;
+}
+
+.templateDesc {
+  font-size: 11.5px;
+  color: var(--erp-text-2);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.templateBadge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   Attribute Fields Panel — animated mount
+   -------------------------------------------------------------------------- */
+.attributePanel {
+  animation: panelIn 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+  border-radius: var(--erp-radius);
+  border: 1px solid var(--erp-border);
+  padding: 24px;
+  background: var(--erp-surface-2);
+  position: relative;
+  overflow: hidden;
+}
+
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.panelAccentBar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+}
+
+/* --------------------------------------------------------------------------
+   Form Controls
+   -------------------------------------------------------------------------- */
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--erp-text-2);
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.required {
+  color: var(--erp-error);
+  font-size: 13px;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  background: var(--erp-surface-3);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius-sm);
+  color: var(--erp-text-1);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 10px 13px;
+  outline: none;
+  transition:
+    border-color var(--erp-transition),
+    box-shadow var(--erp-transition),
+    background var(--erp-transition);
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.input::placeholder,
+.textarea::placeholder { color: var(--erp-text-3); }
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--erp-border-focus);
+  box-shadow: 0 0 0 3px var(--erp-accent-glow);
+  background: #1e1e2e;
+}
+
+.input.hasError,
+.select.hasError,
+.textarea.hasError {
+  border-color: var(--erp-error);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.15);
+}
+
+.select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239898b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.select option { background: #1a1a28; color: #f0f0ff; }
+
+.textarea { resize: vertical; min-height: 80px; }
+
+.errorMsg {
+  font-size: 11.5px;
+  color: var(--erp-error);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--erp-text-3);
+  margin-top: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Number input — remove spin arrows
+   -------------------------------------------------------------------------- */
+.input[type='number']::-webkit-outer-spin-button,
+.input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.input[type='number'] { -moz-appearance: textfield; }
+
+/* --------------------------------------------------------------------------
+   Submit / Action Row
+   -------------------------------------------------------------------------- */
+.actionRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 24px;
+  border-top: 1px solid var(--erp-border);
+  margin-top: 8px;
+}
+
+.btnGhost {
+  background: transparent;
+  border: 1px solid var(--erp-border);
+  color: var(--erp-text-2);
+  border-radius: var(--erp-radius-sm);
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--erp-transition);
+  font-family: inherit;
+}
+
+.btnGhost:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--erp-text-1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btnPrimary {
+  background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 50%, #a78bfa 100%);
+  border: none;
+  color: #fff;
+  border-radius: var(--erp-radius-sm);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--erp-transition);
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.35);
+}
+
+.btnPrimary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(139, 92, 246, 0.5);
+}
+
+.btnPrimary:active { transform: translateY(0); }
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* --------------------------------------------------------------------------
+   Success Toast
+   -------------------------------------------------------------------------- */
+.successBanner {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--erp-radius-sm);
+  padding: 14px 18px;
+  color: var(--erp-success);
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: panelIn 0.25s ease both;
+}
+
+/* --------------------------------------------------------------------------
+   Tags input preview
+   -------------------------------------------------------------------------- */
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.tag {
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  color: #c4b5fd;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+}

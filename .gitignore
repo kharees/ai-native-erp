@@ -1,0 +1,62 @@
+# ==============================================================================
+#  AI-Native ERP — Root .gitignore
+# ==============================================================================
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editors ---
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ==============================================================================
+# FRONTEND (Next.js)
+# ==============================================================================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*
+
+# ==============================================================================
+# BACKEND (Python / FastAPI)
+# ==============================================================================
+backend/.env
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/*$py.class
+backend/.venv/
+backend/venv/
+backend/env/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/dist/
+backend/build/
+backend/*.egg-info/
+backend/alembic/versions/*.pyc
+backend/celerybeat-schedule
+backend/celerybeat.pid
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Secrets (never commit these) ---
+*.pem
+*.key
+*.cert
+.env
+.env.*
+!.env.example
