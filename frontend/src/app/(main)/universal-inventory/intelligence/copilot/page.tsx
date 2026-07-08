@@ -24,9 +24,9 @@ export default function CopilotPage() {
                   <div className="bg-white dark:bg-gray-800 p-4 rounded-lg rounded-tl-none border border-gray-200 dark:border-gray-700 shadow-sm max-w-[80%]">
                       <p className="text-sm">Hello! I am your Universal Inventory AI Copilot. I can help you forecast demand, optimize safety stock, or identify risky inventory. What would you like to explore?</p>
                       <div className="mt-4 flex flex-wrap gap-2">
-                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">"Show low stock items"</span>
-                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">"Show dead stock"</span>
-                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">"What products should I reorder?"</span>
+                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">&quot;Show low stock items&quot;</span>
+                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">&quot;Show dead stock&quot;</span>
+                          <span className="text-xs bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">&quot;What products should I reorder?&quot;</span>
                       </div>
                   </div>
               </div>

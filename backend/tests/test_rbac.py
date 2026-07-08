@@ -20,8 +20,7 @@ async def setup_rbac_scenario(db: AsyncSession):
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
     
-    from datetime import datetime
-from datetime import timezone, timezone
+    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     
     # 1. Tenant & User
@@ -70,8 +69,7 @@ async def test_rbac_super_admin_bypass(client: AsyncClient, db_session: AsyncSes
     
     up_id = (await db_session.execute(select(UserProfile.id).where(UserProfile.user_id == user_id))).scalar()
     
-    from datetime import datetime
-from datetime import timezone, timezone
+    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     role_id = uuid.uuid4()
     org_role = TenantRole(id=role_id, tenant_id=tenant_id, name="Organization Admin", is_system=False, hierarchy_level=100, created_at=now, updated_at=now)

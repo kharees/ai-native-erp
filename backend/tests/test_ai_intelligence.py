@@ -6,7 +6,6 @@ Validates AI Intelligence heuristics (Account Risk Score, Inactive Users, etc).
 
 import uuid
 from datetime import datetime
-from datetime import timezone, timezone, timezone, timedelta
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +23,6 @@ async def setup_ai_scenario(db: AsyncSession):
     user_id = uuid.uuid4()
     
     from datetime import datetime
-from datetime import timezone, timezone
     now = datetime.now(timezone.utc)
     
     await db.execute(insert(Tenant).values(id=tenant_id, name="AI Corp", slug="ai", plan="free", company_info={}, business_settings={}, is_active=True, created_at=now, updated_at=now))

@@ -1,0 +1,1 @@
+# Makes migration a package

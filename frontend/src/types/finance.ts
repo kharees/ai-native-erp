@@ -16,7 +16,7 @@ export interface FinanceLedgerBase {
   metadata_insights?: Record<string, any>
 }
 
-export interface CreateFinanceLedgerPayload extends FinanceLedgerBase {}
+export type CreateFinanceLedgerPayload = FinanceLedgerBase
 
 export interface FinanceLedgerResponse extends FinanceLedgerBase {
   id: string

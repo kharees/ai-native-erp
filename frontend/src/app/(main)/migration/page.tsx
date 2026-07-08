@@ -158,10 +158,10 @@ export default function MigrationHubPage() {
               <div className="p-4 border border-red-200 bg-red-50 dark:bg-red-900/10 dark:border-red-800 rounded-lg flex items-start gap-4">
                 <AlertTriangle className="w-6 h-6 text-red-500 mt-1 flex-shrink-0" />
                 <div>
-                  <h4 className="font-bold text-red-800 dark:text-red-400">Row 42: Invalid email format in field 'email'</h4>
-                  <p className="text-sm text-red-600 dark:text-red-300 mt-1">Value provided: "invalid_email.com"</p>
+                  <h4 className="font-bold text-red-800 dark:text-red-400">Row 42: Invalid email format in field &apos;email&apos;</h4>
+                  <p className="text-sm text-red-600 dark:text-red-300 mt-1">Value provided: &quot;invalid_email.com&quot;</p>
                   <div className="mt-3 bg-white dark:bg-slate-800 p-3 rounded border text-sm text-slate-600 dark:text-slate-300">
-                    <span className="font-bold text-indigo-600 dark:text-indigo-400">AI Assistant:</span> The email format is incorrect. Ensure it contains an '@' symbol and a valid domain.
+                    <span className="font-bold text-indigo-600 dark:text-indigo-400">AI Assistant:</span> The email format is incorrect. Ensure it contains an &apos;@&apos; symbol and a valid domain.
                   </div>
                 </div>
               </div>

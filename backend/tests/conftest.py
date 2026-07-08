@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 """
 tests/conftest.py
 =================
@@ -23,9 +24,9 @@ from jose import jwt
 from app.core.database import Base, get_db
 import app.core.database as db
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-from sqlalchemy.pool import StaticPool
-engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=StaticPool, connect_args={"check_same_thread": False})
+TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/universal_ai_erp"
+from sqlalchemy.pool import NullPool
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestingSessionLocal = sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
 )
@@ -40,20 +41,7 @@ import app.middleware.tenant_auth as tenant_auth_mod
 from app.middleware.rbac import RequirePermission
 from app.models.tenants import Tenant
 
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY
 
-@compiles(JSONB, "sqlite")
-def compile_jsonb(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(ARRAY, "sqlite")
-def compile_array(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(UUID, "sqlite")
-def compile_uuid(type_, compiler, **kw):
-    return "VARCHAR(36)"
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -78,53 +66,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             pass
     
-    # SQLite does not support schemas or uuid_generate_v4()
-    if not getattr(Base, "_sqlite_patched", False):
-        from sqlalchemy import text
-        from sqlalchemy.schema import DefaultClause
-        from sqlalchemy.ext.compiler import compiles
-        from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
-        from sqlalchemy.types import ARRAY
 
-        @compiles(PG_ARRAY, 'sqlite')
-        def compile_pg_array(element, compiler, **kw):
-            return "JSON"
-
-        @compiles(ARRAY, 'sqlite')
-        def compile_array(element, compiler, **kw):
-            return "JSON"
-
-        import uuid
-        from sqlalchemy.types import JSON, Uuid
-        from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY as PG_ARRAY
-        
-        for table in Base.metadata.tables.values():
-            for column in table.columns:
-                if isinstance(column.type, JSONB):
-                    column.type = JSON()
-                elif isinstance(column.type, PG_ARRAY):
-                    column.type = JSON()
-                elif isinstance(column.type, ARRAY):
-                    column.type = JSON()
-                elif isinstance(column.type, UUID):
-                    column.type = Uuid(as_uuid=True)
-                    
-                if column.server_default is not None:
-                    arg = str(getattr(column.server_default, 'arg', column.server_default))
-                    if "uuid_generate_v4" in arg:
-                        column.server_default = None
-                        from sqlalchemy import ColumnDefault; column.default = ColumnDefault(uuid.uuid4)
-                    elif "::jsonb" in arg:
-                        column.server_default = DefaultClause(text(arg.replace("::jsonb", "")))
-                    elif "::text[]" in arg:
-                        column.server_default = DefaultClause(text(arg.replace("::text[]", "")))
-                    elif arg.upper() == "TRUE" or arg.upper() == "TEXT('TRUE')":
-                        column.server_default = DefaultClause(text("1"))
-                    elif arg.upper() == "FALSE" or arg.upper() == "TEXT('FALSE')":
-                        column.server_default = DefaultClause(text("0"))
-                    elif "now()" in arg.lower() or "current_timestamp" in arg.lower():
-                        column.server_default = DefaultClause(text("CURRENT_TIMESTAMP"))
-        Base._sqlite_patched = True
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

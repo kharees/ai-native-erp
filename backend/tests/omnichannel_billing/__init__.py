@@ -1,1 +1,1 @@
-# Initialization for omnichannel billing tests
+# Makes omnichannel_billing a package

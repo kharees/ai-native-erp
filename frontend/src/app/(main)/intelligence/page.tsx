@@ -158,7 +158,7 @@ export default function IntelligenceDashboardPage() {
                     <svg className="w-12 h-12 text-gray-300 dark:text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Ask the audit ledger anything.</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-600">"Who changed the finance settings last week?"</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-600">&quot;Who changed the finance settings last week?&quot;</p>
                     </div>
                   </div>
                 )}

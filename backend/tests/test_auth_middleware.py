@@ -21,7 +21,6 @@ async def setup_tenant_and_user(db: AsyncSession):
     user_id = uuid.uuid4()
     
     from datetime import datetime
-from datetime import timezone, timezone
     now = datetime.now(timezone.utc)
     await db.execute(
         insert(Tenant).values(id=tenant_id, name="Test Corp", slug="testcorp", plan="free", company_info={}, business_settings={}, is_active=True, created_at=now, updated_at=now)
