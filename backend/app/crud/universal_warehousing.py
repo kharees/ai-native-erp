@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from sqlalchemy import select, func, update, exc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.universal_warehousing import (
@@ -104,15 +105,17 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
             item_id=payload.item_id,
             warehouse_id=payload.warehouse_id,
             bin_id=payload.bin_id,
-            quantity_on_hand=0.0
+            quantity_on_hand=Decimal("0")
         )
         db.add(balance)
         # Flush to get the record in session
         await db.flush()
 
     # 3. Apply Movement & Create Ledger Entry
+    # balance.quantity_on_hand is a Numeric column (Decimal); payload.quantity is a
+    # Pydantic float. Mixing them in +=/-= raises TypeError, so cast up front.
     quantity_before = balance.quantity_on_hand
-    movement_qty = payload.quantity
+    movement_qty = Decimal(str(payload.quantity))
     
     if payload.transaction_type == "IN":
         balance.quantity_on_hand += movement_qty
@@ -148,7 +151,7 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
                 batch_id=payload.batch_id,
                 warehouse_id=payload.warehouse_id,
                 bin_id=payload.bin_id,
-                quantity_on_hand=0.0
+                quantity_on_hand=Decimal("0")
             )
             db.add(batch_bal)
             await db.flush()
@@ -206,7 +209,7 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
                     serial_obj.status = "in-transit" # Or just dispatch it from current location
 
     # 4. Create Ledger Entry
-    unit_cost_val = float(payload.metadata_fields.get("unit_cost", 0.0)) if payload.metadata_fields else 0.0
+    unit_cost_val = Decimal(str(payload.metadata_fields.get("unit_cost", 0.0))) if payload.metadata_fields else Decimal("0")
     total_cost_val = unit_cost_val * abs(movement_qty)
     
     from app.models.universal_ledger import UniversalInventoryLedger
@@ -252,8 +255,8 @@ async def reserve_stock(db: AsyncSession, tenant_id: uuid.UUID, payload: StockMo
     if not balance:
         raise ValueError("Cannot reserve stock: no balance found at location")
         
-    balance.quantity_reserved += payload.quantity
-    
+    balance.quantity_reserved += Decimal(str(payload.quantity))
+
     if balance.quantity_on_hand < balance.quantity_reserved + balance.quantity_allocated:
         raise ValueError("Insufficient available stock for reservation")
         
@@ -275,8 +278,8 @@ async def allocate_stock(db: AsyncSession, tenant_id: uuid.UUID, payload: StockM
         
     # Allocation often converts a reservation to an allocation.
     # For simplicity in this engine, we just increase allocated.
-    balance.quantity_allocated += payload.quantity
-    
+    balance.quantity_allocated += Decimal(str(payload.quantity))
+
     if balance.quantity_on_hand < balance.quantity_reserved + balance.quantity_allocated:
         raise ValueError("Insufficient available stock for allocation")
         

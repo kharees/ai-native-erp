@@ -111,8 +111,7 @@ async def delete_uom(id: uuid.UUID, tenant_id: TenantIDDep, db: DBDep):
 # Item Master
 # -----------------
 @router.post("/items", response_model=schemas.UniversalItemMasterResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("UniversalInventory", "Items", "Create"))])
-async def create_item(payload: schemas.UniversalItemMasterCreate, tenant_id: TenantIDDep, db: DBDep):
-    user_id = uuid.uuid4()
+async def create_item(payload: schemas.UniversalItemMasterCreate, tenant_id: TenantIDDep, user_id: UserIDDep, db: DBDep):
     try:
         return await crud.create_item(db, tenant_id, user_id, payload)
     except IntegrityError as exc:

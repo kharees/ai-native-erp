@@ -690,8 +690,31 @@ Inject into route handlers as a keyword-only parameter:
     • Stored in ``request.state.tenant_id`` by ``TenantAuthMiddleware``.
 """
 
-UserIDDep = Annotated[uuid.UUID | None, Header(alias="X-User-ID")]
+async def get_verified_user_id(request: Request) -> uuid.UUID | None:
+    """
+    FastAPI dependency that extracts the JWT-verified ``user_id`` from
+    ``request.state`` (written by ``TenantAuthMiddleware`` from the JWT
+    ``sub`` claim, i.e. ``user_accounts.id``).
+
+    Replaces the previous ``X-User-ID`` header-based ``UserIDDep``, which
+    trusted a client-supplied header as identity — any caller could claim
+    to be any user. No database query is performed here; the middleware
+    has already validated the JWT before any route handler runs.
+    """
+    return getattr(request.state, "user_id", None)
+
+
+UserIDDep = Annotated[uuid.UUID | None, Depends(get_verified_user_id)]
 """
-Annotated dependency alias for the User UUID from the request header.
-Used as a temporary placeholder in Sprint 1 before full JWT middleware is wired.
+Annotated dependency alias for the JWT-verified user UUID.
+
+Inject into route handlers as a keyword-only parameter:
+
+    from app.middleware.tenant_auth import UserIDDep
+
+    async def my_route(user_id: UserIDDep, db: DBDep) -> ...:
+        ...
+
+``user_id`` is the JWT ``sub`` claim (``user_accounts.id``) as bound to
+``request.state.user_id`` by ``TenantAuthMiddleware`` — never client-supplied.
 """

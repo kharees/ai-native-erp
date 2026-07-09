@@ -15,7 +15,7 @@ class UniversalWarehouseBase(BaseModel):
     type: str = Field("main", max_length=64)
     status: str = Field("active", max_length=32)
     manager_id: uuid.UUID | None = None
-    capacity: float = Field(0.0, ge=0)
+    capacity_sqft: float = Field(0.0, ge=0)
     is_active: bool = True
 
 class UniversalWarehouseCreate(UniversalWarehouseBase):
@@ -28,7 +28,7 @@ class UniversalWarehouseUpdate(BaseModel):
     type: str | None = Field(None, max_length=64)
     status: str | None = Field(None, max_length=32)
     manager_id: uuid.UUID | None = None
-    capacity: float | None = Field(None, ge=0)
+    capacity_sqft: float | None = Field(None, ge=0)
     is_active: bool | None = None
 
 class UniversalWarehouseResponse(UniversalWarehouseBase):

@@ -70,8 +70,8 @@ class UniversalItemMaster(Base):
     notes = mapped_column(Text(), nullable=True, )
     variants = mapped_column(JSONB(astext_type=Text()), nullable=False, server_default=text("'{}'::jsonb"), )
     attributes = mapped_column(JSONB(astext_type=Text()), nullable=False, server_default=text("'{}'::jsonb"), )
-    created_by = mapped_column(UUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True, )
-    updated_by = mapped_column(UUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True, )
+    created_by = mapped_column(UUID(), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True, )
+    updated_by = mapped_column(UUID(), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True, )
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'), )
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'), )
 
