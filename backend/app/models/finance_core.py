@@ -80,7 +80,7 @@ class JournalVoucher(Base):
     source_document_type = mapped_column(String(100), nullable=True) # e.g., 'sales_invoice', 'vendor_payment'
     source_document_id = mapped_column(String(100), nullable=True)
     
-    created_by = mapped_column(UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True)
+    created_by = mapped_column(UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True)
     approved_by = mapped_column(UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True)
     
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

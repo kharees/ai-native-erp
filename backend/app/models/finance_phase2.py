@@ -120,7 +120,7 @@ class ExpenseClaim(Base):
     __tablename__ = 'finance_expense_claims'
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id = mapped_column(UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = mapped_column(UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
     category_id = mapped_column(UUID(as_uuid=True), ForeignKey("finance_expense_categories.id", ondelete="RESTRICT"), nullable=False, index=True)
     amount = mapped_column(Numeric(15, 2), nullable=False)
     status = mapped_column(String(50), default="SUBMITTED", nullable=False) # SUBMITTED, APPROVED, REJECTED, PAID

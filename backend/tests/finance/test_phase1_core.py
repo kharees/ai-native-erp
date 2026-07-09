@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 @pytest.mark.asyncio
 async def test_create_account_group(async_client: AsyncClient, setup_tenant, auth_headers):

@@ -30,7 +30,7 @@ class AICopilotLog(Base):
     
     id = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id = mapped_column(UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = mapped_column(UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
     
     prompt = mapped_column(Text, nullable=False)
     response = mapped_column(Text, nullable=False)
