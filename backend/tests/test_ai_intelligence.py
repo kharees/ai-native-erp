@@ -5,7 +5,7 @@ Validates AI Intelligence heuristics (Account Risk Score, Inactive Users, etc).
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from sqlalchemy import insert
 
 from app.models.tenants import Tenant
 from app.models.users import UserProfile
+from app.models.auth import UserAccount
 from app.models.audit import TenantAuditLog
 from app.services.ai_intelligence import SecurityAnalyzer, IdentityAnalyzer
 
@@ -21,11 +22,16 @@ pytestmark = pytest.mark.asyncio
 async def setup_ai_scenario(db: AsyncSession):
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    
-    from datetime import datetime
+
+    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    
+
     await db.execute(insert(Tenant).values(id=tenant_id, name="AI Corp", slug="ai", plan="free", company_info={}, business_settings={}, is_active=True, created_at=now, updated_at=now))
+    await db.execute(
+        insert(UserAccount).values(
+            id=user_id, email=f"{user_id}@test.local", hashed_password="not-a-real-hash", is_active=True, created_at=now, updated_at=now
+        )
+    )
     up_id = uuid.uuid4()
     await db.execute(
         insert(UserProfile).values(
@@ -46,7 +52,7 @@ async def test_security_score_brute_force(db_session: AsyncSession):
         logs.append({
             "id": uuid.uuid4(),
             "tenant_id": tenant_id,
-            "user_id": up_id,
+            "user_id": user_id,
             "action_category": "AUTH",
             "action_type": "LOGIN_FAILED",
             "action_source": "API",

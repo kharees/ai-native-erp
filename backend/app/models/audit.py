@@ -16,7 +16,7 @@ class TenantAuditLog(Base):
     __tablename__ = 'tenant_audit_logs'
     id = mapped_column(UUID(), primary_key=True, nullable=False, server_default=text('uuid_generate_v4()'), )
     tenant_id = mapped_column(UUID(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True, )
-    user_id = mapped_column(UUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True, index=True, )
+    user_id = mapped_column(UUID(), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True, index=True, )
     action_category = mapped_column(String(length=64), nullable=False, index=True, )
     action_type = mapped_column(String(length=64), nullable=False, index=True, )
     action_source = mapped_column(String(length=32), nullable=False, server_default=text("'API'"), )

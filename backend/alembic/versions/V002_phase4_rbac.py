@@ -19,35 +19,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    from sqlalchemy.exc import ProgrammingError
-    import asyncpg
-    
+    from sqlalchemy import inspect
+
+    bind = op.get_bind()
+    inspector = inspect(bind)
+
     def safe_add_column(table, col):
-        try:
-            op.add_column(table, col)
-        except Exception as e:
-            if "already exists" in str(e) or "DuplicateColumnError" in str(e):
-                pass
-            else:
-                raise
-                
+        existing = {c["name"] for c in inspector.get_columns(table, schema="public")}
+        if col.name not in existing:
+            op.add_column(table, col, schema="public")
+
     def safe_drop_column(table, col):
-        try:
-            op.drop_column(table, col)
-        except Exception as e:
-            if "does not exist" in str(e):
-                pass
-            else:
-                raise
-                
+        existing = {c["name"] for c in inspector.get_columns(table, schema="public")}
+        if col in existing:
+            op.drop_column(table, col, schema="public")
+
     def safe_add_fk(fk_name, source, target, local, remote, **kwargs):
-        try:
-            op.create_foreign_key(fk_name, source, target, local, remote, **kwargs)
-        except Exception as e:
-            if "already exists" in str(e):
-                pass
-            else:
-                raise
+        existing_fks = inspector.get_foreign_keys(source, schema="public")
+        for fk in existing_fks:
+            if fk.get("constrained_columns") == local:
+                return
+        op.create_foreign_key(fk_name, source, target, local, remote, source_schema="public", referent_schema="public", **kwargs)
 
     # Update user_profiles
     safe_add_column('user_profiles', sa.Column('first_name', sa.String(length=128), nullable=True))

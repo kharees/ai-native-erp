@@ -6,12 +6,14 @@ Validates the AuditLogger service and APIs.
 
 import uuid
 import pytest
+from datetime import datetime, timezone
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import insert
 
 from app.models.tenants import Tenant
 from app.models.users import UserProfile
+from app.models.auth import UserAccount
 from app.services.audit import AuditLogger
 from fastapi import Request
 
@@ -20,11 +22,16 @@ pytestmark = pytest.mark.asyncio
 async def setup_audit_scenario(db: AsyncSession):
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    
-    from datetime import datetime
+
+    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    
+
     await db.execute(insert(Tenant).values(id=tenant_id, name="Audit Corp", slug="audit", plan="free", company_info={}, business_settings={}, is_active=True, created_at=now, updated_at=now))
+    await db.execute(
+        insert(UserAccount).values(
+            id=user_id, email=f"{user_id}@test.local", hashed_password="not-a-real-hash", is_active=True, created_at=now, updated_at=now
+        )
+    )
     up_id = uuid.uuid4()
     await db.execute(
         insert(UserProfile).values(

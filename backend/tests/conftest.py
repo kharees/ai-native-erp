@@ -120,12 +120,10 @@ def create_mock_token(tenant_id: str, user_id: str, scopes: list[str]) -> str:
         "sub": user_id,
         "tenant_id": tenant_id,
         "scopes": scopes,
-        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(minutes=30)
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
-import datetime
-from datetime import timezone
 
 @pytest_asyncio.fixture
 async def setup_tenant(db_session: AsyncSession):
@@ -136,17 +134,24 @@ async def setup_tenant(db_session: AsyncSession):
     return tenant
 
 from app.models.users import UserProfile
+from app.models.auth import UserAccount
 
 @pytest_asyncio.fixture
 async def auth_headers(setup_tenant, db_session: AsyncSession):
     user_id = uuid.uuid4()
+    account = UserAccount(
+        id=user_id,
+        email=f"{user_id}@test.local",
+        hashed_password="not-a-real-hash",
+        is_active=True
+    )
     profile = UserProfile(
         user_id=user_id,
         tenant_id=setup_tenant.id,
         first_name="Test User",
         is_active=True
     )
-    db_session.add(profile)
+    db_session.add_all([account, profile])
     await db_session.commit()
     
     token = create_mock_token(
@@ -200,13 +205,19 @@ async def alt_tenant_headers(db_session: AsyncSession):
     await db_session.refresh(alt_tenant)
     
     user_id = uuid.uuid4()
+    account = UserAccount(
+        id=user_id,
+        email=f"{user_id}@test.local",
+        hashed_password="not-a-real-hash",
+        is_active=True
+    )
     profile = UserProfile(
         user_id=user_id,
         tenant_id=alt_tenant.id,
         first_name="Alt User",
         is_active=True
     )
-    db_session.add(profile)
+    db_session.add_all([account, profile])
     await db_session.commit()
     
     token = create_mock_token(
