@@ -4,7 +4,6 @@ from httpx import AsyncClient
 import uuid
 
 # Import global fixtures
-from tests.fixtures.inventory_fixtures import async_client, setup_tenant, auth_headers, alt_tenant_headers
 from tests.test_universal_inventory import test_create_item
 
 pytestmark = pytest.mark.asyncio

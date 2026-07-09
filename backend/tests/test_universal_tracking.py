@@ -3,7 +3,6 @@ import pytest
 from httpx import AsyncClient
 import uuid
 
-from tests.fixtures.inventory_fixtures import async_client, setup_tenant, auth_headers
 
 pytestmark = pytest.mark.asyncio
 

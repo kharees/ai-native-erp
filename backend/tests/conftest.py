@@ -125,6 +125,23 @@ def create_mock_token(tenant_id: str, user_id: str, scopes: list[str]) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+@pytest.fixture
+def mock_jwt():
+    """Factory fixture building a JWT matching TenantAuthMiddleware's expected claim shape
+    (tenant_id under app_metadata, optional session_id/jti for session-bound tests)."""
+    def _make(sub: str, tenant_id: str, session_id: str | None = None, scopes: list[str] | None = None) -> str:
+        payload = {
+            "sub": sub,
+            "app_metadata": {"tenant_id": tenant_id},
+            "scopes": scopes or [],
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
+        }
+        if session_id:
+            payload["session_id"] = session_id
+        return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return _make
+
+
 @pytest_asyncio.fixture
 async def setup_tenant(db_session: AsyncSession):
     tenant = Tenant(name="Test Tenant", slug="test", plan="enterprise")

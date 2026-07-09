@@ -5,7 +5,7 @@ Validates Session & Device tracking, Force Logout, and Middleware verification.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from sqlalchemy import insert
 
 from app.models.tenants import Tenant
 from app.models.users import UserProfile
+from app.models.auth import UserAccount
 from app.models.sessions import TenantSession
 
 pytestmark = pytest.mark.asyncio
@@ -21,11 +22,11 @@ async def setup_session(db: AsyncSession):
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
     session_id = uuid.uuid4()
-    
-    from datetime import datetime
+
     now = datetime.now(timezone.utc)
-    
+
     await db.execute(insert(Tenant).values(id=tenant_id, name="Sess Corp", slug="sess", plan="free", company_info={}, business_settings={}, is_active=True, created_at=now, updated_at=now))
+    await db.execute(insert(UserAccount).values(id=user_id, email=f"{user_id}@test.local", hashed_password="not-a-real-hash", is_active=True, created_at=now, updated_at=now))
     up_id = uuid.uuid4()
     await db.execute(
         insert(UserProfile).values(
@@ -47,17 +48,17 @@ async def setup_session(db: AsyncSession):
     await db.commit()
     return tenant_id, user_id, session_id
 
-async def test_active_session_auth(client: AsyncClient, db_session: AsyncSession, mock_jwt):
+async def test_active_session_auth(async_client: AsyncClient, db_session: AsyncSession, mock_jwt):
     """An active session should pass auth middleware."""
     tenant_id, user_id, session_id = await setup_session(db_session)
     token = mock_jwt(sub=str(user_id), tenant_id=str(tenant_id), session_id=str(session_id))
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": str(tenant_id)}
     
-    response = await client.get("/api/v1/sessions/me", headers=headers)
+    response = await async_client.get("/api/v1/sessions/me", headers=headers)
     assert response.status_code == 200
     assert len(response.json()) == 1
 
-async def test_revoked_session_blocked(client: AsyncClient, db_session: AsyncSession, mock_jwt):
+async def test_revoked_session_blocked(async_client: AsyncClient, db_session: AsyncSession, mock_jwt):
     """A revoked session (is_active=False) should trigger a 401 Force Logout."""
     tenant_id, user_id, session_id = await setup_session(db_session)
     
@@ -68,16 +69,16 @@ async def test_revoked_session_blocked(client: AsyncClient, db_session: AsyncSes
     token = mock_jwt(sub=str(user_id), tenant_id=str(tenant_id), session_id=str(session_id))
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": str(tenant_id)}
     
-    response = await client.get("/api/v1/sessions/me", headers=headers)
+    response = await async_client.get("/api/v1/sessions/me", headers=headers)
     assert response.status_code == 401
 
-async def test_revoke_all_sessions_endpoint(client: AsyncClient, db_session: AsyncSession, mock_jwt):
+async def test_revoke_all_sessions_endpoint(async_client: AsyncClient, db_session: AsyncSession, mock_jwt):
     """Hitting DELETE /sessions/me/all should revoke sessions."""
     tenant_id, user_id, session_id = await setup_session(db_session)
     token = mock_jwt(sub=str(user_id), tenant_id=str(tenant_id), session_id=str(session_id))
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": str(tenant_id)}
     
-    res = await client.delete("/api/v1/sessions/me/all", headers=headers)
+    res = await async_client.delete("/api/v1/sessions/me/all", headers=headers)
     assert res.status_code == 204
     
     from sqlalchemy import select
