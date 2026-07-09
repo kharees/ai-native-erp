@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import styles from './login.module.css';
-import axios from 'axios';
+import apiClient from '@/lib/apiClient';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -20,7 +20,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const res = await axios.post('http://localhost:8000/api/v1/auth/login', {
+      const res = await apiClient.post('/api/v1/auth/login', {
         email,
         password,
       });
@@ -28,19 +28,10 @@ export default function LoginPage() {
       const { access_token, refresh_token, user } = res.data;
       setAuth(user, access_token, refresh_token);
       
-      // Setup default axios authorization header globally for future requests
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-      if (user.tenant_id) {
-        axios.defaults.headers.common['X-Tenant-ID'] = user.tenant_id;
-      }
-
       router.push('/dashboard');
-    } catch (err: any) {
-      if (err.response && err.response.data && err.response.data.detail) {
-        setError(err.response.data.detail);
-      } else {
-        setError('An unexpected error occurred. Please try again.');
-      }
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }

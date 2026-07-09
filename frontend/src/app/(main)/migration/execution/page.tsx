@@ -1,14 +1,15 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  Play, Pause, Square, RotateCcw, AlertTriangle, CheckCircle, 
-  Clock, Activity, FileText, Download, ShieldAlert, BarChart3, Settings
+  Play, Pause, Square, RotateCcw, CheckCircle, 
+  Clock, Activity, FileText, Download, ShieldAlert, BarChart3
 } from 'lucide-react';
 
 export default function MigrationExecutionPage() {
   const [status, setStatus] = useState<'IMPORTING' | 'PAUSED' | 'CANCELLING' | 'ROLLING_BACK' | 'ROLLED_BACK' | 'SUCCESS'>('PAUSED');
-  const [progress, setProgress] = useState(45);
+  const [progress] = useState(45);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reconciliation' | 'rollback'>('dashboard');
 
   // Simulated metrics

@@ -22,7 +22,7 @@ export interface RolePermission {
   id: string;
   role_id: string;
   permission_id: string;
-  conditions: Record<string, any>;
+  conditions: Record<string, unknown>;
   created_at: string;
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Database, Plus, RefreshCw, CheckCircle, XCircle, Clock, Server, Play, ShieldAlert, Activity } from 'lucide-react';
 
 // Mock types since we don't have the exact API client generated here

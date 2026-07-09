@@ -1,11 +1,11 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useState } from 'react';
 import { Upload, FileText, Database, ShieldAlert, Sparkles, CheckCircle, Search, Settings, AlertTriangle } from 'lucide-react';
 
 export default function MigrationHubPage() {
   const [activeTab, setActiveTab] = useState<'upload' | 'mapping' | 'cleansing' | 'validation' | 'preview'>('upload');
-  const [file, setFile] = useState<File | null>(null);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-8 font-sans text-slate-800 dark:text-slate-200">

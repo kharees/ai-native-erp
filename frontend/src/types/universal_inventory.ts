@@ -64,8 +64,8 @@ export interface UniversalItemMaster {
     images: string[];
     documents: string[];
     notes?: string;
-    variants: Record<string, any>;
-    attributes: Record<string, any>;
+    variants: Record<string, unknown>;
+    attributes: Record<string, unknown>;
     created_by?: string;
     updated_by?: string;
     created_at: string;

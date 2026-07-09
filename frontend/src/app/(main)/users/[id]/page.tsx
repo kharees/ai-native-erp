@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { getUserProfile, updateUser } from '@/services/userService';
-import type { UserProfile } from '@/types/user';
 
 export default function EditUserPage() {
   const router = useRouter();
@@ -22,13 +21,7 @@ export default function EditUserPage() {
     designation: '',
   });
 
-  useEffect(() => {
-    if (userId) {
-      loadUser();
-    }
-  }, [userId]);
-
-  const loadUser = async () => {
+  const loadUser = useCallback(async () => {
     try {
       const user = await getUserProfile(userId);
       setFormData({
@@ -39,11 +32,18 @@ export default function EditUserPage() {
         designation: user.designation || '',
       });
     } catch (err) {
+      console.error('Failed to load user:', err);
       setError('Failed to load user data');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      loadUser();
+    }
+  }, [userId, loadUser]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -63,8 +63,9 @@ export default function EditUserPage() {
         designation: formData.designation,
       });
       router.push('/users');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update user');
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to update user');
       setSaving(false);
     }
   };

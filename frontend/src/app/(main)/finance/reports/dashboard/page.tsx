@@ -1,8 +1,17 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 
+interface FinancialDashboardData {
+  revenue: number;
+  netProfit: number;
+  operatingMargin: number;
+  cashPosition: number;
+  arOutstanding: number;
+  apOutstanding: number;
+}
+
 export default function FinancialDashboard() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<FinancialDashboardData | null>(null);
 
   useEffect(() => {
     // Mock API call to /api/v1/finance-reports/dashboard-summary

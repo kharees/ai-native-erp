@@ -1,7 +1,7 @@
 import apiClient from '@/lib/apiClient';
 import type { UserProfile, UserProvisionPayload, UserUpdatePayload } from '@/types/user';
 
-export async function fetchUsers(params?: Record<string, any>): Promise<UserProfile[]> {
+export async function fetchUsers(params?: Record<string, string | undefined>): Promise<UserProfile[]> {
   const { data } = await apiClient.get<UserProfile[]>('/api/v1/users/', { params });
   return data;
 }

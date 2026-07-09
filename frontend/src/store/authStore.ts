@@ -30,7 +30,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : ({} as any))),
+      storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : undefined!)),
     }
   )
 );

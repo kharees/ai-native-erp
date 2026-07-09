@@ -1,8 +1,19 @@
 'use client';
 import React, { useState } from 'react';
 
+interface AuditLog {
+  id: string;
+  timestamp: string;
+  actor: string;
+  category: string;
+  action: string;
+  resource: string;
+  ip: string;
+  status: string;
+}
+
 export default function AuditDashboardPage() {
-  const [selectedLog, setSelectedLog] = useState<any>(null);
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
   const dummyLogs = [
     {

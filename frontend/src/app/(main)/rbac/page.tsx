@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { fetchRoles, fetchPermissions, updateRolePermissions, createRole } from '@/services/rbacService';
 import type { Role, Permission } from '@/types/rbac';
 

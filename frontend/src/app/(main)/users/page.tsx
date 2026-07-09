@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { fetchUsers, changeUserStatus } from '@/services/userService';
 import type { UserProfile } from '@/types/user';
 
@@ -11,11 +12,7 @@ export default function UsersDirectoryPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
-  useEffect(() => {
-    loadUsers();
-  }, [search, statusFilter]);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchUsers({
@@ -28,7 +25,13 @@ export default function UsersDirectoryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, statusFilter]);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+
 
   const handleStatusChange = async (id: string, currentStatus: boolean) => {
     try {
@@ -112,7 +115,7 @@ export default function UsersDirectoryPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-4">
                         {user.profile_image ? (
-                          <img src={user.profile_image} alt="" className="h-10 w-10 rounded-full object-cover shadow-sm" />
+                          <Image src={user.profile_image} alt="" width={40} height={40} className="rounded-full object-cover shadow-sm" />
                         ) : (
                           <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm shadow-sm">
                             {(user.first_name?.[0] || '')}{(user.last_name?.[0] || '')}

@@ -24,7 +24,6 @@ import { z } from 'zod'
 import { Factory, ShoppingBag, Layers, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 
 import type {
-  InventoryFormData,
   IndustryTemplate,
   InventoryAttributes,
   CreateInventoryItemPayload,

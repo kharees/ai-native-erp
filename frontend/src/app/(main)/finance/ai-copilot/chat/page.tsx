@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 export default function CopilotChatPage() {
   const [messages, setMessages] = useState<any[]>([

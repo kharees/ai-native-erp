@@ -37,7 +37,7 @@ export interface UniversalWarehouseBin {
     shelf?: string;
     max_weight: number;
     max_volume: number;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
     is_active: boolean;
     created_at: string;
     updated_at: string;
@@ -51,7 +51,7 @@ export interface StockMovementRequest {
     reference_type: string;
     reference_id?: string;
     quantity: number;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
 }
 
 export interface StockTransactionResponse {
@@ -63,6 +63,6 @@ export interface StockTransactionResponse {
     reference_type: string;
     reference_id?: string;
     quantity: number;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
     created_at: string;
 }

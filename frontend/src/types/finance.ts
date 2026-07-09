@@ -13,7 +13,7 @@ export interface FinanceLedgerBase {
   amount: number
   currency?: string
   description?: string
-  metadata_insights?: Record<string, any>
+  metadata_insights?: Record<string, unknown>
 }
 
 export type CreateFinanceLedgerPayload = FinanceLedgerBase

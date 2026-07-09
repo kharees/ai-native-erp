@@ -47,13 +47,10 @@ import {
 
 import DynamicInventoryForm from '@/components/dynamic-inventory-form'
 import { useInventoryList, useCreateInventory } from '@/hooks/useInventory'
-import { useInventoryStore }                    from '@/store/inventoryStore'
 import { useTenantSession }                     from '@/hooks/useTenantSession'
 import type {
   CreateInventoryItemPayload,
   InventoryItem,
-  InventoryStatusMeta,
-  InventoryTableColumn,
 } from '@/types/inventory'
 import { INVENTORY_STATUS_META } from '@/types/inventory'
 
@@ -244,8 +241,10 @@ export default function InventoryDashboard() {
 
   // ── Filter state ─────────────────────────────────────────────────────────
   const [sareeType, setSareeType] = useState('')
-  const [attrKey,   setAttrKey]   = useState('')
-  const [attrValue, setAttrValue] = useState('')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_attrKey,   setAttrKey]   = useState('')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_attrValue, setAttrValue] = useState('')
   const [page,      setPage]      = useState(0)
 
   // Applied filter (only changes when user clicks "Apply")

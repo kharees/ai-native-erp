@@ -36,7 +36,7 @@ export interface BillingItemSnapshot {
   tax_rate_pct: number
   tax_amount: number
   discount_pct?: number
-  attributes?: Record<string, any>
+  attributes?: Record<string, unknown>
 }
 
 export interface CreateBillingInvoicePayload {
@@ -55,7 +55,7 @@ export interface CreateBillingInvoicePayload {
   payment_mode?: PaymentMode
   items_snapshot: BillingItemSnapshot[]
   notes?: string
-  invoice_metadata?: Record<string, any>
+  invoice_metadata?: Record<string, unknown>
   payment_status?: PaymentStatus
   payment_reference?: string
   due_date?: string

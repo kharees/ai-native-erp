@@ -2,7 +2,7 @@
 
 import { useAuthStore } from '@/store/authStore';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import apiClient from '@/lib/apiClient';
 
 export default function LogoutButton() {
   const logout = useAuthStore((state) => state.logout);
@@ -10,13 +10,11 @@ export default function LogoutButton() {
 
   const handleLogout = async () => {
     try {
-      await axios.post('http://localhost:8000/api/v1/auth/logout');
-    } catch (e) {
-      // Ignore errors on logout
+      await apiClient.post('/api/v1/auth/logout');
+    } catch {
+      // Ignore errors on logout — always clear local state
     } finally {
       logout();
-      delete axios.defaults.headers.common['Authorization'];
-      delete axios.defaults.headers.common['X-Tenant-ID'];
       router.push('/login');
     }
   };

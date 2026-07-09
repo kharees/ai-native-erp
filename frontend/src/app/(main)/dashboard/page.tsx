@@ -1,12 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import LogoutButton from '@/components/LogoutButton';
-import axios from 'axios';
+import apiClient from '@/lib/apiClient';
+
+interface DashboardMetrics {
+  revenue: number;
+  activeUsers: number;
+  inventoryItems: number;
+  activity: Record<string, unknown>[];
+}
 
 export default function DashboardPage() {
-  const [metrics, setMetrics] = useState<any>({
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
     revenue: 0,
     activeUsers: 0,
     inventoryItems: 0,
@@ -19,10 +25,10 @@ export default function DashboardPage() {
     const fetchDashboardData = async () => {
       try {
         const [financeRes, usersRes, inventoryRes, auditRes] = await Promise.all([
-          axios.get('http://localhost:8000/api/v1/finance-reports/dashboard-summary'),
-          axios.get('http://localhost:8000/api/v1/users/'),
-          axios.get('http://localhost:8000/api/v1/universal-reports/summary'),
-          axios.get('http://localhost:8000/api/v1/audit/?limit=5')
+          apiClient.get('/api/v1/finance-reports/dashboard-summary'),
+          apiClient.get('/api/v1/users/'),
+          apiClient.get('/api/v1/universal-reports/summary'),
+          apiClient.get('/api/v1/audit/?limit=5')
         ]);
 
         setMetrics({
@@ -31,7 +37,7 @@ export default function DashboardPage() {
           inventoryItems: inventoryRes.data.total_items || inventoryRes.data.total_quantity || 0,
           activity: auditRes.data || []
         });
-      } catch (err: any) {
+      } catch (err) {
         console.error('Error fetching dashboard data:', err);
         setError('Failed to load dashboard metrics. Check API connections.');
       } finally {
@@ -79,17 +85,17 @@ export default function DashboardPage() {
           ) : metrics.activity.length === 0 ? (
             <p style={{ padding: '1rem', color: 'var(--text-muted)' }}>No recent activity found.</p>
           ) : (
-            metrics.activity.map((log: any, index: number) => (
-              <div key={log.id || index} className="activity-item" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', borderBottom: '1px solid var(--border)' }}>
+            metrics.activity.map((log: Record<string, unknown>, index: number) => (
+              <div key={(log.id as string) || index} className="activity-item" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', borderBottom: '1px solid var(--border)' }}>
                 <div className="avatar" style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
-                  {log.action_category?.substring(0, 1) || 'A'}
+                  {((log.action_category as string) || 'A').substring(0, 1)}
                 </div>
                 <div className="activity-details" style={{ flex: 1 }}>
                   <p style={{ margin: 0, fontWeight: 500 }}>
-                    {log.action_category} - {log.action_type}
+                    {log.action_category as string} - {log.action_type as string}
                   </p>
                   <p className="time" style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                    {new Date(log.created_at).toLocaleString()}
+                    {new Date(log.created_at as string).toLocaleString()}
                   </p>
                 </div>
               </div>

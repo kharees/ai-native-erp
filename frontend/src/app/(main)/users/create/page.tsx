@@ -58,8 +58,9 @@ export default function ProvisionUserPage() {
         roles: formData.selectedRoles
       });
       router.push('/users');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to provision user');
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to provision user');
       setLoading(false);
     }
   };

@@ -42,7 +42,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { setActiveTenant, getActiveTenant } from '@/lib/apiClient'
+import { setActiveTenant } from '@/lib/apiClient'
 
 // =============================================================================
 // 1.  Auth state discriminant
