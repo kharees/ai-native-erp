@@ -94,7 +94,7 @@ async def provision_user(
         **profile_data, 
         user_id=new_account.id, 
         tenant_id=tenant_id,
-        created_by=uuid.UUID(current_user_id) if current_user_id else None
+        created_by=current_user_id if current_user_id else None
     )
     db.add(db_user)
     await db.commit()
@@ -106,7 +106,7 @@ async def provision_user(
             tenant_id=tenant_id,
             user_id=db_user.id,
             role_id=role_id,
-            created_by=uuid.UUID(current_user_id) if current_user_id else None
+            created_by=current_user_id if current_user_id else None
         )
         db.add(new_user_role)
     if user_in.roles:
@@ -221,7 +221,7 @@ async def update_user_profile(
         setattr(db_user, key, value)
         
     if current_user_id:
-        db_user.updated_by = uuid.UUID(current_user_id)
+        db_user.updated_by = current_user_id
     db_user.updated_at = datetime.now(timezone.utc)
         
     await db.commit()
@@ -271,7 +271,7 @@ async def delete_user(
         
     db_user.deleted_at = datetime.now(timezone.utc)
     if current_user_id:
-        db_user.updated_by = uuid.UUID(current_user_id)
+        db_user.updated_by = current_user_id
         
     # Optional: also disable the UserAccount
     acc_stmt = select(UserAccount).where(UserAccount.id == db_user.user_id)

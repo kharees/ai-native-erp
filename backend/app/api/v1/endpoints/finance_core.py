@@ -62,6 +62,28 @@ async def list_account_groups(
     tenant_id = get_tenant_id(request)
     return await finance_core.get_account_groups(db, tenant_id=tenant_id, skip=skip, limit=limit)
 
+@router.get("/account-groups/{id}", response_model=AccountGroupOut, dependencies=[Depends(RequirePermission("Finance", "AccountGroup", "Read"))])
+async def get_account_group(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    obj = await finance_core.get_account_group(db, id, tenant_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Account group '{id}' not found.")
+    return obj
+
+@router.patch("/account-groups/{id}", response_model=AccountGroupOut, dependencies=[Depends(RequirePermission("Finance", "AccountGroup", "Update"))])
+async def update_account_group(request: Request, id: UUID, payload: AccountGroupUpdate, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    obj = await finance_core.get_account_group(db, id, tenant_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Account group '{id}' not found.")
+    result = await finance_core.update_account_group(db, obj, payload)
+    await AuditLogger.log_action(
+        db=db, request=request, action_category="FINANCE", action_type="UPDATE_ACCOUNT_GROUP",
+        resource_id=str(result.id)
+    )
+    await db.commit()
+    return result
+
 # --- Accounts (Chart of Accounts) ---
 
 @router.post("/accounts", response_model=AccountOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Finance", "Account", "Create"))])
@@ -90,6 +112,28 @@ async def list_accounts(
 ):
     tenant_id = get_tenant_id(request)
     return await finance_core.get_accounts(db, tenant_id=tenant_id, skip=skip, limit=limit)
+
+@router.get("/accounts/{id}", response_model=AccountOut, dependencies=[Depends(RequirePermission("Finance", "Account", "Read"))])
+async def get_account(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    obj = await finance_core.get_account(db, id, tenant_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Account '{id}' not found.")
+    return obj
+
+@router.patch("/accounts/{id}", response_model=AccountOut, dependencies=[Depends(RequirePermission("Finance", "Account", "Update"))])
+async def update_account(request: Request, id: UUID, payload: AccountUpdate, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    obj = await finance_core.get_account(db, id, tenant_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Account '{id}' not found.")
+    result = await finance_core.update_account(db, obj, payload)
+    await AuditLogger.log_action(
+        db=db, request=request, action_category="FINANCE", action_type="UPDATE_ACCOUNT",
+        resource_id=str(result.id)
+    )
+    await db.commit()
+    return result
 
 # --- Journal Vouchers ---
 
@@ -120,6 +164,14 @@ async def list_journal_vouchers(
 ):
     tenant_id = get_tenant_id(request)
     return await finance_core.get_journal_vouchers(db, tenant_id=tenant_id, skip=skip, limit=limit)
+
+@router.get("/journals/{id}", response_model=JournalVoucherOut, dependencies=[Depends(RequirePermission("Finance", "Journal", "Read"))])
+async def get_journal_voucher(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    obj = await finance_core.get_journal_voucher(db, id, tenant_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail=f"Journal voucher '{id}' not found.")
+    return obj
 
 @router.post("/journals/{voucher_id}/approve", response_model=JournalVoucherOut, dependencies=[Depends(RequirePermission("Finance", "Journal", "Approve"))])
 async def approve_journal_voucher(

@@ -21,7 +21,7 @@ class TenantUserRole(Base):
     branch_id = mapped_column(UUID(), ForeignKey("tenant_branches.id", ondelete="CASCADE"), nullable=True, )
     warehouse_id = mapped_column(UUID(), ForeignKey("tenant_warehouses.id", ondelete="CASCADE"), nullable=True, )
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'), )
-    created_by = mapped_column(UUID(), ForeignKey("user_profiles.id", ondelete="SET NULL"), nullable=True, )
+    created_by = mapped_column(UUID(), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True, )
 # --- TenantRolePermission ---
 from sqlalchemy import *
 from sqlalchemy.orm import Mapped, mapped_column
