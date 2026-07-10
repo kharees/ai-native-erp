@@ -39,8 +39,7 @@ async def get_sales_summary(db: AsyncSession, tenant_id: uuid.UUID, period: str)
     )
 
 async def get_leaderboards(db: AsyncSession, tenant_id: uuid.UUID) -> AnalyticsLeaderboardResponse:
-    # Top Customers mock logic
-    stmt = select(UniversalCustomer.company_name, func.sum(UniversalTaxInvoice.total_amount), func.count(UniversalTaxInvoice.id))\
+    stmt = select(UniversalCustomer.name, func.sum(UniversalTaxInvoice.total_amount), func.count(UniversalTaxInvoice.id))\
         .join(UniversalTaxInvoice, UniversalCustomer.id == UniversalTaxInvoice.customer_id)\
         .where(UniversalTaxInvoice.tenant_id == tenant_id)\
         .group_by(UniversalCustomer.id)\
