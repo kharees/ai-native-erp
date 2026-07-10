@@ -48,10 +48,25 @@ backend/*.egg-info/
 backend/alembic/versions/*.pyc
 backend/celerybeat-schedule
 backend/celerybeat.pid
+backend/.coverage
+backend/.benchmarks/
+backend/test.db
+backend/*.txt
+!backend/requirements.txt
+
+# --- Python venv (actually lives at repo root, not backend/.venv) ---
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
 
 # --- Logs ---
 *.log
 logs/
+err.txt
+error.txt
 
 # --- Secrets (never commit these) ---
 *.pem
