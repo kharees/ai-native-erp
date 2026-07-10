@@ -1,37 +1,36 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-"use client";
-import React, { useState } from 'react';
+'use client';
+
+import { useState } from 'react';
+import apiClient, { isApiError } from '@/lib/apiClient';
+
+interface Message {
+  role: 'system' | 'user' | 'ai';
+  text: string;
+}
 
 export default function CopilotChatPage() {
-  const [messages, setMessages] = useState<any[]>([
-    { role: 'system', text: 'Hello, CFO. I am your AI Finance Copilot. I have analyzed the latest General Ledger data. How can I assist you today?' }
+  const [messages, setMessages] = useState<Message[]>([
+    { role: 'system', text: 'Hello, CFO. I am your AI Finance Copilot. How can I assist you today?' },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    const userMessage = { role: 'user', text: input };
-    setMessages(prev => [...prev, userMessage]);
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+    const prompt = input;
+    setMessages((prev) => [...prev, { role: 'user', text: prompt }]);
     setInput('');
     setLoading(true);
-
-    // Mock API Call to POST /api/v1/finance-ai/chat
-    setTimeout(() => {
-      let responseText = "I am analyzing the General Ledger for underlying trends. Based on standard heuristics, there are no immediate compliance risks. Could you specify if you are looking for Budget Variances or Asset Depreciation forecasts?";
-      
-      const lowerInput = input.toLowerCase();
-      if (lowerInput.includes('p&l') || lowerInput.includes('profit') || lowerInput.includes('expense')) {
-        responseText = "Based on the latest GL aggregations, your Net Profit margin is currently healthy at 28%. However, operating expenses specifically in the Marketing category have increased by 30% against the Q1 Budget. I recommend reviewing the recent journal entries under the 5300 Account.";
-      } else if (lowerInput.includes('overdue') || lowerInput.includes('receivable')) {
-        responseText = "Currently, Accounts Receivable stands at $65,000. There are 3 major collections flagged in the 60-90 day aging bucket. Our predictive model suggests a 15% risk of bad debt if not acted upon within the next 7 days.";
-      } else if (lowerInput.includes('cash flow') || lowerInput.includes('predict')) {
-        responseText = "The Cash Flow Forecast model for Q3-2026 predicts a net increase to $650,000. Operating cash flow remains strong, though liquidity may tighten briefly mid-quarter due to the scheduled Property & Equipment acquisition of $150,000.";
-      }
-
-      setMessages(prev => [...prev, { role: 'ai', text: responseText }]);
+    setError('');
+    try {
+      const res = await apiClient.post('/api/v1/finance-ai/chat', { prompt });
+      setMessages((prev) => [...prev, { role: 'ai', text: res.data.response }]);
+    } catch (err) {
+      setError(isApiError(err) ? err.message : 'Failed to reach the AI copilot');
+    } finally {
       setLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -58,18 +57,19 @@ export default function CopilotChatPage() {
             </div>
           </div>
         )}
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
 
       <div className="flex gap-2">
-        <input 
-          type="text" 
+        <input
+          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask me to explain the P&L, predict cash flow, or flag risks..." 
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          placeholder="Ask me to explain the P&L, predict cash flow, or flag risks..."
           className="flex-1 border border-gray-300 rounded-lg px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button 
+        <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
           className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow hover:bg-blue-700 disabled:opacity-50 font-bold"

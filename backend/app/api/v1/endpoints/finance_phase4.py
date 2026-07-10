@@ -38,6 +38,11 @@ async def create_asset_category(request: Request, payload: FixedAssetCategoryCre
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_ASSET_CATEGORY", resource_id=str(result.id))
     return result
 
+@router.get("/assets/categories", response_model=List[FixedAssetCategoryOut], dependencies=[Depends(RequirePermission("Finance", "FixedAsset", "Read"))])
+async def list_asset_categories(request: Request, skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    return await finance_phase4.get_asset_categories(db, tenant_id=tenant_id, skip=skip, limit=limit)
+
 @router.post("/assets", response_model=FixedAssetOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Finance", "FixedAsset", "Create"))])
 async def create_fixed_asset(request: Request, payload: FixedAssetCreate, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)

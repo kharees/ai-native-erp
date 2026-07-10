@@ -1,30 +1,34 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-"use client";
-import React, { useState, useEffect } from 'react';
+'use client';
+
+import { useEffect, useState } from 'react';
+import apiClient from '@/lib/apiClient';
+
+interface TrialBalanceLine {
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  closing_debit: number;
+  closing_credit: number;
+}
+
+interface TrialBalanceReport {
+  lines: TrialBalanceLine[];
+  total_debit: number;
+  total_credit: number;
+}
 
 export default function TrialBalancePage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<TrialBalanceReport | null>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    setTimeout(() => {
-      setData({
-        lines: [
-          { account_code: '1000', account_name: 'Cash Equivalents', account_type: 'asset', closing_debit: 575000, closing_credit: 0 },
-          { account_code: '1200', account_name: 'Accounts Receivable', account_type: 'asset', closing_debit: 65000, closing_credit: 0 },
-          { account_code: '2000', account_name: 'Accounts Payable', account_type: 'liability', closing_debit: 0, closing_credit: 17550 },
-          { account_code: '3000', account_name: 'Owner Equity', account_type: 'equity', closing_debit: 0, closing_credit: 542450 },
-          { account_code: '4000', account_name: 'Product Sales', account_type: 'income', closing_debit: 0, closing_credit: 850000 },
-          { account_code: '5000', account_name: 'Payroll Expense', account_type: 'expense', closing_debit: 250000, closing_credit: 0 },
-          { account_code: '5100', account_name: 'Cost of Goods Sold', account_type: 'expense', closing_debit: 450000, closing_credit: 0 },
-          { account_code: '5200', account_name: 'Rent', account_type: 'expense', closing_debit: 60000, closing_credit: 0 },
-          { account_code: '5300', account_name: 'Marketing', account_type: 'expense', closing_debit: 10000, closing_credit: 0 },
-        ],
-        total_debit: 1410000,
-        total_credit: 1410000
-      });
-    }, 500);
+    apiClient
+      .get('/api/v1/finance-reports/trial-balance')
+      .then((res) => setData(res.data))
+      .catch(() => setError('Failed to load trial balance'));
   }, []);
 
+  if (error) return <div className="p-6 text-red-600">{error}</div>;
   if (!data) return <div className="p-6">Loading statement...</div>;
 
   return (
@@ -34,7 +38,6 @@ export default function TrialBalancePage() {
           <h1 className="text-2xl font-bold">Trial Balance</h1>
           <p className="text-gray-500 text-sm">Real-time ledger aggregation</p>
         </div>
-        <button className="bg-gray-100 text-gray-700 px-4 py-2 rounded shadow hover:bg-gray-200">Export PDF</button>
       </div>
 
       <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -49,16 +52,18 @@ export default function TrialBalancePage() {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {data.lines.map((line: any, idx: number) => (
+            {data.lines.length === 0 ? (
+              <tr><td colSpan={5} className="px-6 py-4 text-center text-gray-500">No account activity found.</td></tr>
+            ) : data.lines.map((line, idx) => (
               <tr key={idx} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{line.account_code}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{line.account_name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">{line.account_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                  {line.closing_debit > 0 ? `$${line.closing_debit.toLocaleString()}` : '-'}
+                  {line.closing_debit > 0 ? `$${Number(line.closing_debit).toLocaleString()}` : '-'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                  {line.closing_credit > 0 ? `$${line.closing_credit.toLocaleString()}` : '-'}
+                  {line.closing_credit > 0 ? `$${Number(line.closing_credit).toLocaleString()}` : '-'}
                 </td>
               </tr>
             ))}
@@ -66,8 +71,8 @@ export default function TrialBalancePage() {
           <tfoot className="bg-gray-100">
             <tr>
               <th colSpan={3} className="px-6 py-4 text-right text-sm font-bold text-gray-900">Totals:</th>
-              <th className="px-6 py-4 text-right text-sm font-bold text-green-700">${data.total_debit.toLocaleString()}</th>
-              <th className="px-6 py-4 text-right text-sm font-bold text-green-700">${data.total_credit.toLocaleString()}</th>
+              <th className="px-6 py-4 text-right text-sm font-bold text-green-700">${Number(data.total_debit).toLocaleString()}</th>
+              <th className="px-6 py-4 text-right text-sm font-bold text-green-700">${Number(data.total_credit).toLocaleString()}</th>
             </tr>
           </tfoot>
         </table>
