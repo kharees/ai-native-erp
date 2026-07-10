@@ -26,6 +26,16 @@ def get_tenant_id(request: Request) -> uuid.UUID:
         raise HTTPException(status_code=400, detail="Invalid tenant ID format")
 
 
+@router.get("/sessions", response_model=List[MigrationSessionOut])
+async def list_migration_sessions(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    tenant_id = get_tenant_id(request)
+    stmt = select(MigrationSession).where(MigrationSession.tenant_id == tenant_id).order_by(MigrationSession.created_at.desc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
 @router.post("/upload", response_model=MigrationSessionOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Migration", "System", "Execute"))])
 async def upload_migration_file(
     request: Request,
