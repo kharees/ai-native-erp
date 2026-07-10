@@ -75,3 +75,6 @@ error.txt
 .env
 .env.*
 !.env.example
+
+# --- Frontend build cache ---
+frontend/tsconfig.tsbuildinfo
