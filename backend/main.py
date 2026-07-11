@@ -339,10 +339,7 @@ from app.api.v1.router import api_router
 
 app.include_router(api_router, prefix="/api/v1")
 
-# Individual module routers (add here as new modules are created):
-from app.api.v1.endpoints.auth       import router as auth_router
-# from app.api.v1.endpoints.tenants    import router as tenants_router
-# from app.api.v1.endpoints.users      import router as users_router
-app.include_router(auth_router,      prefix="/api/v1/auth",      tags=["Auth"])
-# app.include_router(tenants_router,   prefix="/api/v1/tenants",   tags=["Tenants"])
-# app.include_router(users_router,     prefix="/api/v1/users",     tags=["Users"])
+# NOTE: The auth router is already mounted at /api/v1/auth via api_router
+# (see app/api/v1/router.py: api_router.include_router(auth.router, prefix="/auth", ...)).
+# A duplicate explicit mount used to exist here — removed to avoid two live
+# copies of the same routes in the OpenAPI schema and app.routes.

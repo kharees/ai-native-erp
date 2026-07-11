@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,7 +9,13 @@ import uuid
 from app.core.database import get_db
 from app.models.auth import UserAccount
 from app.models.users import UserProfile
-from app.core.security import verify_password, create_access_token, create_refresh_token
+from app.models.sessions import TenantSession
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+)
 
 router = APIRouter()
 
@@ -65,16 +73,40 @@ async def login(
     if user_profile:
         tenant_id = str(user_profile.tenant_id)
 
-    # 4. Create tokens
+    # 4. Create a tracked session row (enables real revocation — see
+    #    TenantAuthMiddleware's session-active check and DELETE /sessions/*).
+    #    Only tenant-scoped users get a session; tenant-less accounts fall
+    #    back to plain stateless JWTs as before.
+    session_id: str | None = None
+    if user_profile:
+        now = datetime.now(timezone.utc)
+        ua_header = (request.headers.get("user-agent") or "")[:64]
+        new_session = TenantSession(
+            tenant_id=user_profile.tenant_id,
+            user_id=user_profile.id,
+            ip_address=request.client.host if request.client else None,
+            browser=ua_header or None,
+            is_active=True,
+            last_active_at=now,
+            expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+        db.add(new_session)
+        await db.commit()
+        await db.refresh(new_session)
+        session_id = str(new_session.id)
+
+    # 5. Create tokens
     jwt_data = {
         "sub": str(user_account.id),
         "email": user_account.email
     }
-    
+
     # We must match what tenant_auth.py expects. It looks at:
     # app_metadata.tenant_id or user_metadata.tenant_id or raw_tenant_id
     if tenant_id:
         jwt_data["app_metadata"] = {"tenant_id": tenant_id}
+    if session_id:
+        jwt_data["session_id"] = session_id
 
     access_token = create_access_token(data=jwt_data)
     refresh_token = create_refresh_token(data=jwt_data)
@@ -106,6 +138,11 @@ async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db))
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        # Reject access tokens presented at the refresh endpoint — access and
+        # refresh tokens share a secret, so the type claim is the only thing
+        # stopping one from being replayed as the other.
+        if payload.get("token_type") != "refresh":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
@@ -124,12 +161,25 @@ async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db))
 
     tenant_id = str(user_profile.tenant_id) if user_profile else None
 
+    # Carry the session_id forward so a revoked session cannot be resurrected
+    # by refreshing — a refresh token minted before revocation must not be
+    # able to mint a fresh, unrevoked-looking access token.
+    session_id = payload.get("session_id")
+    if session_id:
+        sess_stmt = select(TenantSession.is_active).where(TenantSession.id == uuid.UUID(session_id))
+        sess_result = await db.execute(sess_stmt)
+        session_active = sess_result.scalar_one_or_none()
+        if session_active is not True:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked. Please log in again.")
+
     jwt_data = {
         "sub": str(user_account.id),
         "email": user_account.email
     }
     if tenant_id:
         jwt_data["app_metadata"] = {"tenant_id": tenant_id}
+    if session_id:
+        jwt_data["session_id"] = session_id
 
     new_access = create_access_token(data=jwt_data)
     new_refresh = create_refresh_token(data=jwt_data)
@@ -183,7 +233,26 @@ async def get_current_user_me(request: Request, db: AsyncSession = Depends(get_d
     }
 
 @router.post("/logout")
-async def logout():
-    # In a stateless JWT setup, client deletes the token.
-    # Optionally, we could blacklist the token here.
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+    """Revoke the calling token's session (if any) so it can no longer pass
+    TenantAuthMiddleware's session-active check, in addition to the client
+    discarding the token locally."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[len("Bearer "):]
+        from jose import jwt, JWTError
+        from app.core.config import settings
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+            session_id = payload.get("session_id")
+            if session_id:
+                stmt = select(TenantSession).where(TenantSession.id == uuid.UUID(session_id))
+                result = await db.execute(stmt)
+                session_obj = result.scalar_one_or_none()
+                if session_obj:
+                    session_obj.is_active = False
+                    await db.commit()
+        except JWTError:
+            pass
+
     return {"message": "Logged out successfully"}

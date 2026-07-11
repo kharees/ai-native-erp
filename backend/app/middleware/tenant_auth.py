@@ -100,12 +100,14 @@ from __future__ import annotations
 
 import time
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Callable, Sequence
 
 import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
@@ -117,6 +119,26 @@ from app.models.users import UserProfile
 from app.models.sessions import TenantSession
 from jose import JWTError, jwt
 from app.core.config import settings
+
+#: Minimum interval between `last_active_at` writes for the same session.
+#: Every authenticated request would otherwise issue an UPDATE + COMMIT on
+#: the hot path; throttling collapses bursts of requests from one client
+#: (e.g. a dashboard firing several parallel widget calls) into one write.
+_LAST_ACTIVE_THROTTLE = timedelta(seconds=60)
+
+
+@dataclass(frozen=True)
+class _TenantValidation:
+    tenant_id: uuid.UUID
+    tenant_slug: str
+    tenant_plan: str
+    # None = no session_id was supplied on this request.
+    # True  = session exists and is active.
+    # False = session exists but has been revoked.
+    # "missing" is represented by returning session_active=None *and*
+    # session_checked=True — see below.
+    session_active: bool | None
+    session_checked: bool
 
 # ---------------------------------------------------------------------------
 # Module-level structlog logger
@@ -192,11 +214,23 @@ async def _validate_tenant(
     tenant_uuid: uuid.UUID,
     user_uuid: uuid.UUID | None,
     session_uuid: uuid.UUID | None = None
-) -> tuple[uuid.UUID, str, str] | None:
+) -> _TenantValidation | None:
     """
     Query ``public.tenants`` for an active tenant matching ``tenant_uuid``.
     If user_uuid is provided, ensures user is active.
-    If session_uuid is provided, ensures session is active.
+    If session_uuid is provided, separately checks whether that session is
+    still active (revoked sessions must reject even if the tenant/user are
+    otherwise fine) and opportunistically throttle-updates its
+    ``last_active_at`` timestamp.
+
+    Both checks run against a single ``AsyncSessionLocal()`` connection —
+    previously this function and the caller's separate revocation check each
+    opened their own connection, meaning every authenticated request could
+    open up to 3 DB sessions (this function, the revocation check, and the
+    route handler's own `Depends(get_db)`). Folding them into one connection
+    here brings that down to 2 (this middleware's connection + the route
+    handler's), which is the practical floor for a design where tenant
+    validation runs in ASGI middleware ahead of FastAPI's dependency graph.
     """
     stmt = (
         select(
@@ -207,34 +241,53 @@ async def _validate_tenant(
         .where(Tenant.id == tenant_uuid)
         .where(Tenant.is_active.is_(True))
     )
-    
+
     if user_uuid:
         stmt = stmt.join(UserProfile, UserProfile.tenant_id == Tenant.id).where(
             UserProfile.user_id == user_uuid
         ).where(UserProfile.is_active.is_(True))
-        
-    if session_uuid:
-        stmt = stmt.join(TenantSession, TenantSession.tenant_id == Tenant.id).where(
-            TenantSession.id == session_uuid
-        )
-        
+
     stmt = stmt.limit(1)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(stmt)
         row = result.one_or_none()
-        
-        # If valid and a session was provided, opportunistically update last_active_at
-        if row and session_uuid:
-            from sqlalchemy import update
-            from datetime import datetime, timezone
-            update_stmt = update(TenantSession).where(TenantSession.id == session_uuid).values(last_active_at=datetime.now(timezone.utc))
-            await session.execute(update_stmt)
-            await session.commit()
+
+        session_active: bool | None = None
+        if session_uuid is not None:
+            sess_stmt = select(
+                TenantSession.is_active, TenantSession.last_active_at
+            ).where(TenantSession.id == session_uuid)
+            sess_result = await session.execute(sess_stmt)
+            sess_row = sess_result.one_or_none()
+
+            if sess_row is None:
+                session_active = None  # session_checked=True + None => "not found"
+            else:
+                session_active = sess_row.is_active
+                if session_active:
+                    now = datetime.now(timezone.utc)
+                    stale = (
+                        sess_row.last_active_at is None
+                        or (now - sess_row.last_active_at) > _LAST_ACTIVE_THROTTLE
+                    )
+                    if stale:
+                        await session.execute(
+                            update(TenantSession)
+                            .where(TenantSession.id == session_uuid)
+                            .values(last_active_at=now)
+                        )
+                        await session.commit()
 
     if row is None:
         return None
-    return (row.id, row.slug, row.plan)
+    return _TenantValidation(
+        tenant_id=row.id,
+        tenant_slug=row.slug,
+        tenant_plan=row.plan,
+        session_active=session_active,
+        session_checked=session_uuid is not None,
+    )
 
 
 # =============================================================================
@@ -556,21 +609,19 @@ class TenantAuthMiddleware(BaseHTTPMiddleware):
                 ),
             )
 
-        _tenant_id, _tenant_slug, _tenant_plan = tenant_row
+        _tenant_id, _tenant_slug, _tenant_plan = (
+            tenant_row.tenant_id, tenant_row.tenant_slug, tenant_row.tenant_plan
+        )
 
         # ── Stage 4.5: Check if session is revoked ─────────────────────────────
-        if session_uuid:
-            async with AsyncSessionLocal() as db_session:
-                from app.models.sessions import TenantSession
-                from sqlalchemy import select
-                stmt = select(TenantSession.is_active).where(TenantSession.id == session_uuid)
-                is_active = (await db_session.execute(stmt)).scalar_one_or_none()
-                if is_active is False:
-                    bound.warning("tenant_auth.session_revoked", action="reject_401")
-                    return _build_401(request, detail="Session has been revoked. Please log in again.")
-                elif is_active is None:
-                    bound.warning("tenant_auth.session_not_found", action="reject_401")
-                    return _build_401(request, detail="Invalid session.")
+        # (folded into the single _validate_tenant() query above — see #11/#12)
+        if tenant_row.session_checked:
+            if tenant_row.session_active is False:
+                bound.warning("tenant_auth.session_revoked", action="reject_401")
+                return _build_401(request, detail="Session has been revoked. Please log in again.")
+            elif tenant_row.session_active is None:
+                bound.warning("tenant_auth.session_not_found", action="reject_401")
+                return _build_401(request, detail="Invalid session.")
 
         # ── Stage 5: Bind validated context to request.state ──────────────────
         # request.state is the canonical per-request store (matching the
