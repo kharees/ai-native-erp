@@ -18,6 +18,7 @@ import structlog
 from app.core.database import get_db
 from app.models.billing import TenantBillingInvoice
 from app.schemas.billing import BillingInvoiceCreate, BillingInvoiceResponse
+from app.middleware.rbac import RequirePermission
 
 
 log = structlog.get_logger(__name__)
@@ -36,6 +37,7 @@ def generate_invoice_code() -> str:
     response_model=BillingInvoiceResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new billing invoice",
+    dependencies=[Depends(RequirePermission("Billing", "Invoices", "Create"))],
 )
 async def create_invoice(
     request: Request,
@@ -96,6 +98,7 @@ async def create_invoice(
     "/",
     response_model=List[BillingInvoiceResponse],
     summary="Retrieve invoice history",
+    dependencies=[Depends(RequirePermission("Billing", "Invoices", "Read"))],
 )
 async def get_invoice_history(
     request: Request,

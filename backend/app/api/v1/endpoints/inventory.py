@@ -51,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.middleware.tenant_auth import TenantIDDep as TenantDep
 
 from app.core.database import get_db
+from app.middleware.rbac import RequirePermission
 from app.models.inventory import InventoryItem as TenantSareeInventory
 from app.schemas.inventory import (
     InventoryItemCreate,
@@ -100,6 +101,7 @@ DBDep     = Annotated[AsyncSession, Depends(get_db)]
     response_description=(
         "The persisted saree inventory node with server-generated id and timestamps."
     ),
+    dependencies=[Depends(RequirePermission("LegacyInventory", "Saree", "Create"))],
 )
 async def ingest_inventory_node(
     payload:   InventoryItemCreate,
@@ -233,6 +235,7 @@ async def ingest_inventory_node(
     response_description=(
         "Paginated list of saree inventory nodes for the authenticated tenant."
     ),
+    dependencies=[Depends(RequirePermission("LegacyInventory", "Saree", "Read"))],
 )
 async def list_saree_catalog(
     tenant_id:  TenantDep,
@@ -372,6 +375,7 @@ async def list_saree_catalog(
     response_description=(
         "Paginated list of saree inventory nodes matching the JSONB attribute predicate."
     ),
+    dependencies=[Depends(RequirePermission("LegacyInventory", "Saree", "Read"))],
 )
 async def filter_by_jsonb_attributes(
     tenant_id:       TenantDep,

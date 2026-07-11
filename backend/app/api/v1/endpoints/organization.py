@@ -21,13 +21,14 @@ from app.schemas.organization import (
     TenantSettingsUpdate, TenantResponse
 )
 from app.middleware.tenant_auth import TenantIDDep
+from app.middleware.rbac import RequirePermission
 
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
 # Tenant Organization Settings
 # ---------------------------------------------------------------------------
-@router.get("/", response_model=TenantResponse)
+@router.get("/", response_model=TenantResponse, dependencies=[Depends(RequirePermission("Organization", "Profile", "Read"))])
 async def get_organization_profile(
     tenant_id: TenantIDDep,
     db: AsyncSession = Depends(get_db)
@@ -42,7 +43,7 @@ async def get_organization_profile(
         
     return tenant
 
-@router.patch("/", response_model=TenantResponse)
+@router.patch("/", response_model=TenantResponse, dependencies=[Depends(RequirePermission("Organization", "Profile", "Update"))])
 async def update_organization_settings(
     update_data: TenantSettingsUpdate,
     tenant_id: TenantIDDep,
@@ -67,7 +68,7 @@ async def update_organization_settings(
 # ---------------------------------------------------------------------------
 # Branches
 # ---------------------------------------------------------------------------
-@router.post("/branches", response_model=TenantBranchResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/branches", response_model=TenantBranchResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Organization", "Branches", "Create"))])
 async def create_branch(
     branch: TenantBranchCreate,
     tenant_id: TenantIDDep,
@@ -79,7 +80,7 @@ async def create_branch(
     await db.refresh(db_branch)
     return db_branch
 
-@router.get("/branches", response_model=List[TenantBranchResponse])
+@router.get("/branches", response_model=List[TenantBranchResponse], dependencies=[Depends(RequirePermission("Organization", "Branches", "Read"))])
 async def list_branches(
     tenant_id: TenantIDDep,
     db: AsyncSession = Depends(get_db)
@@ -88,7 +89,7 @@ async def list_branches(
     result = await db.execute(stmt)
     return result.scalars().all()
 
-@router.patch("/branches/{branch_id}", response_model=TenantBranchResponse)
+@router.patch("/branches/{branch_id}", response_model=TenantBranchResponse, dependencies=[Depends(RequirePermission("Organization", "Branches", "Update"))])
 async def update_branch(
     branch_id: uuid.UUID,
     branch_update: TenantBranchUpdate,
@@ -116,7 +117,7 @@ async def update_branch(
 # ---------------------------------------------------------------------------
 # Departments
 # ---------------------------------------------------------------------------
-@router.post("/departments", response_model=TenantDepartmentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/departments", response_model=TenantDepartmentResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Organization", "Departments", "Create"))])
 async def create_department(
     dept: TenantDepartmentCreate,
     tenant_id: TenantIDDep,
@@ -128,7 +129,7 @@ async def create_department(
     await db.refresh(db_dept)
     return db_dept
 
-@router.get("/departments", response_model=List[TenantDepartmentResponse])
+@router.get("/departments", response_model=List[TenantDepartmentResponse], dependencies=[Depends(RequirePermission("Organization", "Departments", "Read"))])
 async def list_departments(
     tenant_id: TenantIDDep,
     db: AsyncSession = Depends(get_db)
@@ -137,7 +138,7 @@ async def list_departments(
     result = await db.execute(stmt)
     return result.scalars().all()
 
-@router.patch("/departments/{dept_id}", response_model=TenantDepartmentResponse)
+@router.patch("/departments/{dept_id}", response_model=TenantDepartmentResponse, dependencies=[Depends(RequirePermission("Organization", "Departments", "Update"))])
 async def update_department(
     dept_id: uuid.UUID,
     dept_update: TenantDepartmentUpdate,
@@ -165,7 +166,7 @@ async def update_department(
 # ---------------------------------------------------------------------------
 # Warehouses
 # ---------------------------------------------------------------------------
-@router.post("/warehouses", response_model=TenantWarehouseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/warehouses", response_model=TenantWarehouseResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Organization", "Warehouses", "Create"))])
 async def create_warehouse(
     warehouse: TenantWarehouseCreate,
     tenant_id: TenantIDDep,
@@ -177,7 +178,7 @@ async def create_warehouse(
     await db.refresh(db_wh)
     return db_wh
 
-@router.get("/warehouses", response_model=List[TenantWarehouseResponse])
+@router.get("/warehouses", response_model=List[TenantWarehouseResponse], dependencies=[Depends(RequirePermission("Organization", "Warehouses", "Read"))])
 async def list_warehouses(
     tenant_id: TenantIDDep,
     db: AsyncSession = Depends(get_db)
@@ -186,7 +187,7 @@ async def list_warehouses(
     result = await db.execute(stmt)
     return result.scalars().all()
 
-@router.patch("/warehouses/{warehouse_id}", response_model=TenantWarehouseResponse)
+@router.patch("/warehouses/{warehouse_id}", response_model=TenantWarehouseResponse, dependencies=[Depends(RequirePermission("Organization", "Warehouses", "Update"))])
 async def update_warehouse(
     warehouse_id: uuid.UUID,
     wh_update: TenantWarehouseUpdate,

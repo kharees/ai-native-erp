@@ -17,11 +17,14 @@ from app.models.users import UserProfile
 from app.models.auth import UserAccount
 from app.models.rbac import TenantUserRole
 from app.middleware.tenant_auth import TenantIDDep
+from app.middleware.rbac import RequirePermission
 from app.schemas.users import UserProfileProvision, UserProfileUpdate, UserProfileResponse
 from app.core.security import get_password_hash
 
 router = APIRouter()
 
+# NOTE: /me is intentionally left authentication-only, same rationale as
+# tenants.py's /me — it only ever returns the caller's own profile.
 @router.get("/me", response_model=UserProfileResponse)
 async def get_current_user(
     request: Request,
@@ -51,7 +54,7 @@ async def get_current_user(
     response_data["email"] = email
     return response_data
 
-@router.post("/", response_model=UserProfileResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=UserProfileResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(RequirePermission("Users", "Directory", "Create"))])
 async def provision_user(
     request: Request,
     user_in: UserProfileProvision,
@@ -116,7 +119,7 @@ async def provision_user(
     response_data["email"] = new_account.email
     return response_data
 
-@router.get("/", response_model=List[UserProfileResponse])
+@router.get("/", response_model=List[UserProfileResponse], dependencies=[Depends(RequirePermission("Users", "Directory", "Read"))])
 async def list_users(
     tenant_id: TenantIDDep,
     db: AsyncSession = Depends(get_db),
@@ -165,7 +168,7 @@ async def list_users(
         
     return users_resp
 
-@router.get("/{profile_id}", response_model=UserProfileResponse)
+@router.get("/{profile_id}", response_model=UserProfileResponse, dependencies=[Depends(RequirePermission("Users", "Directory", "Read"))])
 async def get_user_profile(
     profile_id: uuid.UUID,
     tenant_id: TenantIDDep,
@@ -190,7 +193,7 @@ async def get_user_profile(
     response_data["email"] = email
     return response_data
 
-@router.patch("/{profile_id}", response_model=UserProfileResponse)
+@router.patch("/{profile_id}", response_model=UserProfileResponse, dependencies=[Depends(RequirePermission("Users", "Directory", "Update"))])
 async def update_user_profile(
     request: Request,
     profile_id: uuid.UUID,
@@ -231,7 +234,7 @@ async def update_user_profile(
     response_data["email"] = user_account.email
     return response_data
 
-@router.patch("/{profile_id}/status", response_model=UserProfileResponse)
+@router.patch("/{profile_id}/status", response_model=UserProfileResponse, dependencies=[Depends(RequirePermission("Users", "Directory", "Update"))])
 async def change_user_status(
     request: Request,
     profile_id: uuid.UUID,
@@ -248,7 +251,7 @@ async def change_user_status(
         db=db
     )
 
-@router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(RequirePermission("Users", "Directory", "Delete"))])
 async def delete_user(
     request: Request,
     profile_id: uuid.UUID,

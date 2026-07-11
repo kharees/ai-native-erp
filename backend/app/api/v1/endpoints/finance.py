@@ -19,6 +19,7 @@ from app.schemas.finance import (
     FinanceLedgerResponse,
     FinanceSummaryResponse,
 )
+from app.middleware.rbac import RequirePermission
 
 
 log = structlog.get_logger(__name__)
@@ -30,6 +31,7 @@ router = APIRouter()
     response_model=FinanceLedgerResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Record a new ledger transaction",
+    dependencies=[Depends(RequirePermission("FinanceLedger", "Transactions", "Create"))],
 )
 async def record_transaction(
     request: Request,
@@ -80,6 +82,7 @@ async def record_transaction(
     "/summary",
     response_model=FinanceSummaryResponse,
     summary="Retrieve multi-tenant financial summary",
+    dependencies=[Depends(RequirePermission("FinanceLedger", "Summary", "Read"))],
 )
 async def get_finance_summary(
     request: Request,

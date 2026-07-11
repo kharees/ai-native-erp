@@ -14,6 +14,12 @@ from app.middleware.tenant_auth import TenantIDDep
 
 router = APIRouter()
 
+# NOTE: /me is intentionally left authentication-only (no RequirePermission
+# gate). It only ever returns the caller's own tenant's public profile —
+# every authenticated member of a tenant is expected to be able to read
+# their own tenant's name/plan (e.g. for display in the app header).
+# Gating a self-read endpoint behind a granular permission would silently
+# 403 ordinary staff roles that have no explicit grant for it yet.
 @router.get("/me")
 async def get_current_tenant(
     tenant_id: TenantIDDep,
