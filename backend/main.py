@@ -216,6 +216,24 @@ async def request_logging_middleware(request: Request, call_next) -> Response:
 # Global Exception Handlers
 # ===========================================================================
 
+from app.crud.crud_finance_core import FinanceCoreError
+
+
+@app.exception_handler(FinanceCoreError)
+async def finance_core_error_handler(request: Request, exc: FinanceCoreError) -> JSONResponse:
+    """Translate finance-core CRUD domain errors into HTTP responses.
+
+    Kept as a dedicated handler (rather than a try/except in every route)
+    so crud_finance_core.py stays decoupled from FastAPI — it can raise
+    FinanceCoreError from any caller, not just an HTTP request handler.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id},
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for unhandled exceptions — returns a safe 500 response."""

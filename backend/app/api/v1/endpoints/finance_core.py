@@ -5,10 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
+from sqlalchemy import select
+
 from app.core.database import get_db
 from app.middleware.rbac import RequirePermission
 from app.services.audit import AuditLogger
 from app.crud.crud_finance_core import finance_core
+from app.models.users import UserProfile
 from app.schemas.finance_core import (
     AccountGroupCreate, AccountGroupOut, AccountGroupUpdate,
     AccountCreate, AccountOut, AccountUpdate,
@@ -181,7 +184,19 @@ async def approve_journal_voucher(
 ):
     tenant_id = get_tenant_id(request)
     user_id = get_user_id(request)
-    result = await finance_core.approve_journal_voucher(db, id=voucher_id, tenant_id=tenant_id, user_id=user_id)
+
+    # JournalVoucher.approved_by is a FK to user_profiles.id, not
+    # user_accounts.id — resolve the tenant-scoped profile for the calling
+    # account before handing it to the CRUD layer. Passing the raw JWT `sub`
+    # (an account id) here throws a FK violation on every approval.
+    approver_profile_id = None
+    if user_id:
+        prof_stmt = select(UserProfile.id).where(
+            UserProfile.user_id == user_id, UserProfile.tenant_id == tenant_id
+        )
+        approver_profile_id = (await db.execute(prof_stmt)).scalar_one_or_none()
+
+    result = await finance_core.approve_journal_voucher(db, id=voucher_id, tenant_id=tenant_id, user_id=approver_profile_id)
     await AuditLogger.log_action(
         db=db, request=request, action_category="FINANCE", action_type="APPROVE_JOURNAL_VOUCHER",
         resource_id=str(result.id)
