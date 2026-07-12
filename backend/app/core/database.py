@@ -147,7 +147,27 @@ _supabase_client: AClient | None = None
 
 def get_supabase() -> AClient:
     """
-    Return the singleton Supabase async client.
+    Return the singleton Supabase async client — SERVICE ROLE, meaning it
+    bypasses Postgres Row-Level Security entirely. As of this writing
+    (audited for #38) nothing in app/ actually calls this outside this
+    module: every business CRUD path goes through get_db() / db_session(),
+    which enforces tenant isolation at the application layer (every query
+    filters by tenant_id explicitly — see middleware/tenant_auth.py's
+    layered-defense docstring). That is the correct, tenant-safe pattern.
+
+    Do NOT reach for this client to query or write tenant-scoped business
+    data (finance, inventory, billing, migration records, etc.) — there is
+    no tenant filter enforced for you here, unlike get_db(). A bug in a
+    caller's own tenant filter (or simply forgetting to add one) leaks
+    cross-tenant data silently, since RLS — the defense-in-depth layer that
+    would normally catch exactly this class of bug — cannot see this
+    connection's role and does not apply.
+
+    This exists for Storage, Auth Admin, and Realtime operations that
+    genuinely need to bypass RLS (e.g. managing auth.users). If you are
+    building an AI tool-calling agent and need it to read/write business
+    data, give it get_db() (or a service function built on it), never this.
+    See docs/ai-foundation.md for the full readiness assessment.
 
     Raises RuntimeError if called before init_db() has completed
     (i.e., before the FastAPI lifespan startup has run).
