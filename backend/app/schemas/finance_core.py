@@ -50,10 +50,17 @@ class AccountUpdate(BaseModel):
     status: Optional[AccountStatus] = None
     currency: Optional[str] = Field(None, max_length=3)
     is_reconciliation_account: Optional[bool] = None
+    # Optimistic-locking check (audit #36). Optional — omitting it skips
+    # the check entirely (preserves the existing API contract for callers
+    # that don't send it yet); pass the value from a prior AccountOut.version
+    # to have concurrent edits rejected with 409 instead of silently
+    # overwriting each other.
+    expected_version: Optional[int] = None
 
 class AccountOut(AccountBase):
     id: UUID
     tenant_id: UUID
+    version: int
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

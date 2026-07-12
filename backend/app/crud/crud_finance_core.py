@@ -87,8 +87,16 @@ class CRUDFinanceCore:
 
     async def update_account(self, db: AsyncSession, db_obj: Account, obj_in: AccountUpdate) -> Account:
         update_data = obj_in.model_dump(exclude_unset=True)
+        expected_version = update_data.pop("expected_version", None)
+        if expected_version is not None and expected_version != db_obj.version:
+            raise FinanceCoreError(
+                f"Account was modified by someone else (expected version {expected_version}, "
+                f"current version is {db_obj.version}). Reload and retry.",
+                409,
+            )
         for field in update_data:
             setattr(db_obj, field, update_data[field])
+        db_obj.version += 1
         db.add(db_obj)
         await db.flush()
         await db.refresh(db_obj)

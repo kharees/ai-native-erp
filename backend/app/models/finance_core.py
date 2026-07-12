@@ -53,6 +53,12 @@ class Account(Base):
     status = mapped_column(Enum(AccountStatus, name='finance_account_status'), default=AccountStatus.ACTIVE, nullable=False)
     currency = mapped_column(String(3), default='USD', nullable=False)
     is_reconciliation_account = mapped_column(Boolean, default=False, nullable=False)
+    # Optimistic-locking counter (audit #36) — two concurrent PATCH
+    # /accounts/{id} calls without this would silently last-write-win, one
+    # edit clobbering the other with no warning. Incremented on every
+    # successful update; a caller must pass the version it last read via
+    # AccountUpdate.expected_version, or the update is rejected with 409.
+    version = mapped_column(Integer, default=1, server_default=text('1'), nullable=False)
     created_at = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
