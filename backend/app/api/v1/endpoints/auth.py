@@ -1,12 +1,13 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 import uuid
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.auth import UserAccount
 from app.models.users import UserProfile
@@ -20,19 +21,51 @@ from app.core.security import (
 
 router = APIRouter()
 
+# The refresh token is never sent to JS — see TokenResponse.refresh_token's
+# docstring below. Scoped to /api/v1/auth (only the routes that need it:
+# /refresh reads it, /logout clears it) rather than the whole site, so it
+# isn't attached to every unrelated API request.
+_REFRESH_COOKIE_NAME = "refresh_token"
+_REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=_REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=settings.ENVIRONMENT == "production",
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path=_REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=_REFRESH_COOKIE_NAME, path=_REFRESH_COOKIE_PATH)
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
 
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
+    # Deliberately never populated — the refresh token travels only via the
+    # httpOnly `refresh_token` cookie set on /login and /refresh, never in a
+    # JSON body a script can read. Kept as a field (always null) rather than
+    # removed outright so any code still destructuring res.data.refresh_token
+    # gets `undefined`/`null` instead of a hard KeyError. See #10 in the
+    # audit: tokens in localStorage are fully exposed to any XSS anywhere in
+    # the app; an httpOnly cookie is invisible to JS entirely.
+    refresh_token: None = None
     token_type: str = "bearer"
     user: dict
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db)
 ):
     content_type = request.headers.get("content-type", "")
@@ -125,22 +158,23 @@ async def login(
         "last_name": user_profile.last_name if user_profile else None
     }
 
+    _set_refresh_cookie(response, refresh_token)
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         user=user_info
     )
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     from jose import jwt, JWTError
-    from app.core.config import settings
+
+    incoming_refresh_token = request.cookies.get(_REFRESH_COOKIE_NAME)
+    if not incoming_refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token cookie present")
 
     try:
-        payload = jwt.decode(req.refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(incoming_refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
@@ -198,7 +232,9 @@ async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db))
         "last_name": user_profile.last_name if user_profile else None
     }
 
-    return TokenResponse(access_token=new_access, refresh_token=new_refresh, user=user_info)
+    # Rotate the cookie on every refresh (new refresh token, new expiry).
+    _set_refresh_cookie(response, new_refresh)
+    return TokenResponse(access_token=new_access, user=user_info)
 
 @router.get("/me")
 async def get_current_user_me(request: Request, db: AsyncSession = Depends(get_db)):
@@ -239,15 +275,15 @@ async def get_current_user_me(request: Request, db: AsyncSession = Depends(get_d
     }
 
 @router.post("/logout")
-async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """Revoke the calling token's session (if any) so it can no longer pass
-    TenantAuthMiddleware's session-active check, in addition to the client
-    discarding the token locally."""
+    TenantAuthMiddleware's session-active check, and clear the refresh
+    cookie so the browser can't silently mint a new access token after
+    logout."""
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[len("Bearer "):]
         from jose import jwt, JWTError
-        from app.core.config import settings
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
             session_id = payload.get("session_id")
@@ -261,4 +297,5 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
         except JWTError:
             pass
 
+    _clear_refresh_cookie(response)
     return {"message": "Logged out successfully"}

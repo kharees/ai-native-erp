@@ -87,6 +87,11 @@ const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
+  // Required for the browser to send/receive the httpOnly refresh_token
+  // cookie (see backend/app/api/v1/endpoints/auth.py) — without this,
+  // /api/v1/auth/refresh never receives the cookie cross-origin (frontend
+  // :3000, backend :8000 in dev).
+  withCredentials: true,
 })
 
 // =============================================================================
@@ -114,14 +119,60 @@ apiClient.interceptors.request.use(
 )
 
 // =============================================================================
-// 5.  Response interceptor — normalise errors
+// 5.  Silent refresh on 401 — retried once via the httpOnly refresh cookie
+// =============================================================================
+
+/**
+ * Concurrent requests that all 401 around the same time (e.g. a dashboard
+ * firing several parallel widget calls right as the access token expires)
+ * must not each independently call /auth/refresh — that would race
+ * multiple refresh-cookie rotations against each other. This coalesces
+ * them into one in-flight refresh that every caller awaits.
+ */
+let _refreshPromise: Promise<string | null> | null = null
+
+async function _refreshAccessToken(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = axios
+      .post(`${BASE_URL}/api/v1/auth/refresh`, null, { withCredentials: true })
+      .then((res) => res.data.access_token as string)
+      .catch(() => null)
+      .finally(() => {
+        _refreshPromise = null
+      })
+  }
+  return _refreshPromise
+}
+
+// =============================================================================
+// 6.  Response interceptor — silent refresh, then normalise errors
 // =============================================================================
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
-  (error: AxiosError<{ error?: string; detail?: unknown }>): never => {
+  async (error: AxiosError<{ error?: string; detail?: unknown }>) => {
     const status = error.response?.status ?? 0
-    const body   = error.response?.data
+    const originalRequest = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined
+
+    const isAuthEndpoint = originalRequest?.url?.includes('/api/v1/auth/login')
+      || originalRequest?.url?.includes('/api/v1/auth/refresh')
+
+    if (status === 401 && originalRequest && !originalRequest._retried && !isAuthEndpoint) {
+      originalRequest._retried = true
+      const newAccessToken = await _refreshAccessToken()
+      if (newAccessToken) {
+        useAuthStore.getState().setAccessToken(newAccessToken)
+        originalRequest.headers = originalRequest.headers ?? {}
+        originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
+        return apiClient(originalRequest)
+      }
+      // Refresh failed (cookie missing/expired/revoked) — the session is
+      // truly over, not just the access token stale. Clear local state so
+      // the UI reflects "logged out" instead of silently retrying forever.
+      useAuthStore.getState().logout()
+    }
+
+    const body = error.response?.data
 
     const apiError: ApiError = {
       status,

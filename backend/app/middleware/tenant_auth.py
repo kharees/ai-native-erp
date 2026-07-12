@@ -301,6 +301,36 @@ async def _validate_tenant(
 #     existing error response contract (detail string + request_id).
 # =============================================================================
 
+def _add_cors_headers(response: JSONResponse, request: Request) -> JSONResponse:
+    """
+    Manually attach CORS headers to a response this middleware short-circuits
+    directly (401/403/500 before call_next() ever runs).
+
+    Starlette's CORSMiddleware normally adds these by wrapping the ASGI
+    `send` callable — but TenantAuthMiddleware is a BaseHTTPMiddleware
+    subclass, which Starlette documents as having issues interacting with
+    other ASGI middleware precisely because of how it bridges the ASGI
+    send/receive protocol into a Request/Response abstraction (see #13 in
+    the audit). In practice: any response this middleware returns directly,
+    without ever calling call_next(), never passes back through
+    CORSMiddleware's send wrapper, so the browser sees a response with no
+    Access-Control-Allow-Origin header and reports a CORS failure — masking
+    the real 401/403 behind a misleading "CORS policy" error in the console,
+    exactly what a frontend hitting an expired/invalid token sees today.
+
+    This is a targeted patch for that specific gap, not the full fix #13
+    describes (converting TenantAuthMiddleware to pure ASGI middleware or a
+    dependency) — that's a larger, riskier rewrite of the auth hot path
+    deferred as a documented follow-up (see docs/production-hardening.md).
+    """
+    origin = request.headers.get("origin")
+    if origin and origin in settings.CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
 def _build_401(request: Request, detail: str) -> JSONResponse:
     """
     Build an HTTP 401 Unauthorized ``JSONResponse``.
@@ -315,7 +345,7 @@ def _build_401(request: Request, detail: str) -> JSONResponse:
     detail:
         Human-readable error message.
     """
-    return JSONResponse(
+    return _add_cors_headers(JSONResponse(
         status_code=status.HTTP_401_UNAUTHORIZED,
         content={
             "error":      "tenant_authentication_required",
@@ -323,7 +353,7 @@ def _build_401(request: Request, detail: str) -> JSONResponse:
             "request_id": getattr(request.state, "request_id", "unknown"),
         },
         headers={"WWW-Authenticate": "TenantID"},
-    )
+    ), request)
 
 
 def _build_403(request: Request, detail: str) -> JSONResponse:
@@ -340,14 +370,14 @@ def _build_403(request: Request, detail: str) -> JSONResponse:
     detail:
         Human-readable rejection reason (safe — no internal DB details leaked).
     """
-    return JSONResponse(
+    return _add_cors_headers(JSONResponse(
         status_code=status.HTTP_403_FORBIDDEN,
         content={
             "error":      "tenant_access_denied",
             "detail":     detail,
             "request_id": getattr(request.state, "request_id", "unknown"),
         },
-    )
+    ), request)
 
 
 def _build_500(request: Request) -> JSONResponse:
@@ -357,14 +387,14 @@ def _build_500(request: Request) -> JSONResponse:
     Used when the tenant validation DB query raises an unexpected exception.
     The body contains no internal detail — error is fully logged server-side.
     """
-    return JSONResponse(
+    return _add_cors_headers(JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error":      "tenant_auth_service_error",
             "detail":     "An internal error occurred during tenant authentication.",
             "request_id": getattr(request.state, "request_id", "unknown"),
         },
-    )
+    ), request)
 
 
 # =============================================================================

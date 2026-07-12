@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import styles from './login.module.css';
-import apiClient from '@/lib/apiClient';
+import apiClient, { isApiError } from '@/lib/apiClient';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -25,13 +25,18 @@ export default function LoginPage() {
         password,
       });
 
-      const { access_token, refresh_token, user } = res.data;
-      setAuth(user, access_token, refresh_token);
+      // The refresh token is set as an httpOnly cookie by the backend, not
+      // returned in the response body — see authStore.ts.
+      const { access_token, user } = res.data;
+      setAuth(user, access_token);
       
       router.push('/dashboard');
     } catch (err) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'An unexpected error occurred. Please try again.');
+      if (isApiError(err)) {
+        setError(err.message || 'An unexpected error occurred. Please try again.');
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
