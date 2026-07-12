@@ -7,6 +7,7 @@ Provides an isolated, transactional database for each test and a mock FastAPI cl
 """
 
 import asyncio
+import os
 import uuid
 from typing import AsyncGenerator
 
@@ -24,7 +25,14 @@ from jose import jwt
 from app.core.database import Base, get_db
 import app.core.database as db
 
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/universal_ai_erp"
+# Reads DATABASE_URL if set (CI sets this — see .github/workflows/ci.yml —
+# to point at its Postgres service container) so CI configuration actually
+# takes effect, instead of this hardcoded value silently overriding whatever
+# the environment specifies. Falls back to the same local default this has
+# always used for running tests outside CI.
+TEST_DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/universal_ai_erp"
+)
 from sqlalchemy.pool import NullPool
 engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestingSessionLocal = sessionmaker(
@@ -45,7 +53,24 @@ from app.models.tenants import Tenant
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create an instance of the default event loop for each test case."""
+    """
+    Session-scoped event loop with a stubbed-out close() (audit #29 flags
+    this as a deprecated pytest-asyncio pattern — it is, but not an
+    oversight). `engine` above is created once at module import time and
+    its asyncpg connection pool is bound to whichever event loop existed
+    when those connections were opened; pytest-asyncio's modern default is
+    a fresh event loop per test function, which would tear down and orphan
+    that pool after the first test, breaking every test after it (asyncpg
+    connections can't be reused across event loops).
+
+    The correct modern fix is creating `engine` fresh per test function
+    (or per session-scoped fixture that itself manages disposal) instead of
+    once at module level — a larger restructuring of every fixture that
+    depends on the module-level `engine`/`TestingSessionLocal` (db_session,
+    async_client, and everything built on them), not safe to change without
+    re-verifying every test in this suite individually. Documented as a
+    residual gap rather than attempted here — see docs/production-hardening.md.
+    """
     policy = asyncio.get_event_loop_policy()
     res = policy.new_event_loop()
     asyncio.set_event_loop(res)

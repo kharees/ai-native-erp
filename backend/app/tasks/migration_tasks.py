@@ -19,7 +19,7 @@ import structlog
 from sqlalchemy import select
 
 from app.core.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
+import app.core.database as db_module
 from app.models.migration import MigrationSession
 
 log = structlog.get_logger(__name__)
@@ -28,7 +28,13 @@ log = structlog.get_logger(__name__)
 async def _run_import(session_id: str) -> None:
     from app.services.migration_engine import execute_import_chunked
 
-    async with AsyncSessionLocal() as db:
+    # Reads db_module.AsyncSessionLocal at call time, not import time — a
+    # `from app.core.database import AsyncSessionLocal` here would capture
+    # a reference at import time that tests/conftest.py's monkey-patched
+    # test session factory can never reach (audit #29: this exact pattern
+    # already bit middleware/tenant_auth.py before conftest.py added a
+    # targeted second patch for it specifically; this avoids needing one).
+    async with db_module.AsyncSessionLocal() as db:
         stmt = select(MigrationSession).where(MigrationSession.id == uuid.UUID(session_id))
         session = (await db.execute(stmt)).scalar_one_or_none()
         if session is None:
