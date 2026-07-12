@@ -41,6 +41,16 @@ from app.core.database import check_db_health, close_db, init_db
 # ---------------------------------------------------------------------------
 log = structlog.get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Sentry — must run before the FastAPI app below is constructed so the
+# FastAPI integration can auto-instrument it. See app/core/sentry.py for
+# why this was never actually being called despite being installed and
+# configured (audit #14).
+# ---------------------------------------------------------------------------
+from app.core.sentry import init_sentry  # noqa: E402
+
+init_sentry()
+
 
 # ===========================================================================
 # Response Schemas (Pydantic)
