@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.universal_payments import (
@@ -21,7 +22,13 @@ async def create_payment_receipt(db: AsyncSession, tenant_id: uuid.UUID, payload
             wallet = UniversalCustomerWallet(tenant_id=tenant_id, customer_id=obj.customer_id, balance=0.0)
             db.add(wallet)
             await db.flush()
-        wallet.balance += obj.unallocated_amount
+        # wallet.balance is a Numeric column (Decimal) once fetched fresh
+        # from the DB (as opposed to a just-constructed Python object where
+        # it's still the raw float passed to the constructor above); mixing
+        # Decimal += float raises TypeError. Only ever surfaced for a
+        # customer's second+ receipt, since the first always hits the
+        # freshly-constructed-object path instead.
+        wallet.balance += Decimal(str(obj.unallocated_amount))
 
     await db.commit()
     await db.refresh(obj)
