@@ -34,9 +34,6 @@ const nextConfig = {
   },
 
   // Removed redirects to allow / to render as landing page
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
 };
 
 module.exports = nextConfig;
