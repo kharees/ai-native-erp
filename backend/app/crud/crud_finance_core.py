@@ -10,6 +10,7 @@ from app.schemas.finance_core import (
     AccountCreate, AccountUpdate,
     JournalVoucherCreate, JournalVoucherUpdate
 )
+from app.services.outbox import enqueue_event
 
 
 class FinanceCoreError(Exception):
@@ -183,6 +184,22 @@ class CRUDFinanceCore:
         db_voucher.status = JournalStatus.POSTED
         db_voucher.approved_by = user_id
         db.add(db_voucher)
+
+        # Transactional outbox (audit #37): written in the same flush/commit
+        # as the posting above, via the same session — either both persist
+        # or neither does. First real domain event emitted anywhere in the
+        # backend; a downstream consumer (webhook, AI trigger, etc.) can
+        # subscribe to "journal_voucher.posted" instead of polling once a
+        # relay/dispatcher exists (not built here — see
+        # docs/production-hardening.md).
+        await enqueue_event(db, tenant_id, "journal_voucher.posted", {
+            "voucher_id": str(db_voucher.id),
+            "voucher_number": db_voucher.voucher_number,
+            "total_debit": str(db_voucher.total_debit),
+            "total_credit": str(db_voucher.total_credit),
+            "approved_by": str(user_id),
+        })
+
         await db.flush()
         await db.refresh(db_voucher)
         await db.refresh(db_voucher, ['lines'])
