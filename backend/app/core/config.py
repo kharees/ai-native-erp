@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
+    AI_PROVIDER: str = "openai"  # "openai" | "anthropic" — which provider get_ai_provider() returns
+    AI_MODEL_OPENAI: str = "gpt-4o-mini"
+    AI_MODEL_ANTHROPIC: str = "claude-3-5-haiku-20241022"
 
     # ------------------------------------------------------------------
     # Redis / Celery
