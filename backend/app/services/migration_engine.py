@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import pandas as pd
 from typing import List, Dict, Any, Optional
@@ -16,6 +17,117 @@ from app.schemas.finance_phase2 import APVendorCreate
 
 UPLOAD_DIR = "/tmp/migration_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Sessions with more valid records than this run the import in the request
+# (existing, contract-preserving synchronous behavior — tests and typical
+# small imports rely on getting the final status back in the response).
+# Above it, POST /import enqueues a Celery task (app/tasks/migration_tasks.py)
+# and returns immediately with status IMPORTING; the caller polls
+# GET /migration/execution/{id}/status. This is the real fix for #27: a
+# large legacy import (tens of thousands of rows) no longer runs inside one
+# HTTP request/response cycle and risks a gateway timeout.
+IMPORT_ASYNC_THRESHOLD = 500
+
+# Records processed per commit. Committing per-chunk rather than once at the
+# very end means a crash mid-import only loses the current in-flight chunk —
+# already-committed records keep is_imported=True, so resuming (re-running
+# the same session_id's import) only reprocesses the remainder, since the
+# record query below always filters is_imported == False.
+CHUNK_SIZE = 200
+
+
+async def _import_one_record(db: AsyncSession, session: MigrationSession, record: "MigrationDataRecord") -> bool:
+    """Creates the target entity for one migration record. Returns True on
+    success; on failure, marks the record and returns False rather than
+    raising, so one bad row doesn't abort the whole chunk."""
+    try:
+        if session.entity_type == MigrationEntityType.CUSTOMER:
+            create_schema = UniversalCustomerCreate(
+                tenant_id=session.tenant_id,
+                name=record.mapped_data.get('name'),
+                email=record.mapped_data.get('email'),
+                phone=record.mapped_data.get('phone')
+            )
+            created = await universal_customers.create_customer(db, session.tenant_id, create_schema)
+            record.target_record_id = str(created.id)
+        elif session.entity_type == MigrationEntityType.VENDOR:
+            create_schema = APVendorCreate(
+                tenant_id=session.tenant_id,
+                name=record.mapped_data.get('name'),
+                email=record.mapped_data.get('email'),
+                phone=record.mapped_data.get('phone')
+            )
+            created = await crud_finance_phase2.finance_phase2.create_ap_vendor(db, obj_in=create_schema)
+            record.target_record_id = str(created.id)
+        elif session.entity_type == MigrationEntityType.CHART_OF_ACCOUNTS:
+            create_schema = AccountCreate(
+                tenant_id=session.tenant_id,
+                account_code=record.mapped_data.get('account_code'),
+                name=record.mapped_data.get('name'),
+                account_type=record.mapped_data.get('account_type', 'Asset'),
+                normal_balance=record.mapped_data.get('normal_balance', 'Debit')
+            )
+            created = await crud_finance_core.finance_core.create_account(db, obj_in=create_schema)
+            record.target_record_id = str(created.id)
+        elif session.entity_type == MigrationEntityType.ITEM:
+            created = await inventory.create_inventory_item(db, session.tenant_id, record.mapped_data)
+            record.target_record_id = str(created.id)
+
+        record.is_imported = True
+        return True
+    except Exception as e:
+        record.is_imported = False
+        record.validation_errors = (record.validation_errors or []) + [f"Import Error: {str(e)}"]
+        return False
+
+
+async def execute_import_chunked(db: AsyncSession, session: MigrationSession, chunk_size: int = CHUNK_SIZE) -> MigrationSession:
+    """
+    Processes valid, not-yet-imported records for `session` in chunks,
+    committing (checkpointing) after each one and updating
+    progress_percentage / processing_speed_mps / estimated_remaining_time_sec
+    so GET /migration/execution/{id}/status reflects real progress instead
+    of jumping straight from 0% to 100%. Used both for the synchronous
+    small-session path and inside the Celery task for large sessions — the
+    only difference is which caller awaits it and whether the caller can
+    wait for the return value before responding to its own client.
+    """
+    records_stmt = select(MigrationDataRecord).where(
+        MigrationDataRecord.session_id == session.id,
+        MigrationDataRecord.is_valid == True,
+        MigrationDataRecord.is_imported == False
+    ).order_by(MigrationDataRecord.row_number)
+    valid_records = list((await db.execute(records_stmt)).scalars().all())
+
+    total_to_process = len(valid_records)
+    processed = 0
+    t_start = time.monotonic()
+
+    for chunk_start in range(0, total_to_process, chunk_size):
+        chunk = valid_records[chunk_start: chunk_start + chunk_size]
+        chunk_imported = 0
+        for record in chunk:
+            if await _import_one_record(db, session, record):
+                chunk_imported += 1
+
+        session.imported_records += chunk_imported
+        processed += len(chunk)
+        session.progress_percentage = int((processed / total_to_process) * 100) if total_to_process else 100
+        elapsed = max(time.monotonic() - t_start, 0.001)
+        session.processing_speed_mps = round(processed / elapsed, 2)
+        remaining = total_to_process - processed
+        session.estimated_remaining_time_sec = int(remaining / (processed / elapsed)) if processed > 0 else 0
+
+        await db.commit()
+        await db.refresh(session)
+
+    if session.imported_records >= session.total_records:
+        session.status = MigrationJobStatus.IMPORT_SUCCESS
+    else:
+        session.status = MigrationJobStatus.PARTIAL_SUCCESS
+    await db.commit()
+    await db.refresh(session)
+    return session
 
 class MigrationEngine:
     
@@ -172,73 +284,23 @@ class MigrationEngine:
         stmt = select(MigrationSession).where(MigrationSession.id == session_id)
         result = await db.execute(stmt)
         session = result.scalar_one_or_none()
-        
+
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-            
+
         if session.status not in [MigrationJobStatus.VALIDATION_SUCCESS, MigrationJobStatus.VALIDATION_FAILED]:
             raise HTTPException(status_code=400, detail="Session must be validated before import")
-            
+
         session.status = MigrationJobStatus.IMPORTING
         await db.commit()
-        
-        # Fetch valid records
-        records_stmt = select(MigrationDataRecord).where(
-            MigrationDataRecord.session_id == session_id, 
-            MigrationDataRecord.is_valid == True,
-            MigrationDataRecord.is_imported == False
-        )
-        records_result = await db.execute(records_stmt)
-        valid_records = records_result.scalars().all()
-        
-        imported_count = 0
-        
-        for record in valid_records:
-            try:
-                if session.entity_type == MigrationEntityType.CUSTOMER:
-                    create_schema = UniversalCustomerCreate(
-                        tenant_id=session.tenant_id,
-                        name=record.mapped_data.get('name'),
-                        email=record.mapped_data.get('email'),
-                        phone=record.mapped_data.get('phone')
-                    )
-                    created = await universal_customers.create_customer(db, session.tenant_id, create_schema)
-                    record.target_record_id = str(created.id)
-                elif session.entity_type == MigrationEntityType.VENDOR:
-                    create_schema = APVendorCreate(
-                        tenant_id=session.tenant_id,
-                        name=record.mapped_data.get('name'),
-                        email=record.mapped_data.get('email'),
-                        phone=record.mapped_data.get('phone')
-                    )
-                    created = await crud_finance_phase2.finance_phase2.create_ap_vendor(db, obj_in=create_schema)
-                    record.target_record_id = str(created.id)
-                elif session.entity_type == MigrationEntityType.CHART_OF_ACCOUNTS:
-                    create_schema = AccountCreate(
-                        tenant_id=session.tenant_id,
-                        account_code=record.mapped_data.get('account_code'),
-                        name=record.mapped_data.get('name'),
-                        account_type=record.mapped_data.get('account_type', 'Asset'),
-                        normal_balance=record.mapped_data.get('normal_balance', 'Debit')
-                    )
-                    created = await crud_finance_core.finance_core.create_account(db, obj_in=create_schema)
-                    record.target_record_id = str(created.id)
-                elif session.entity_type == MigrationEntityType.ITEM:
-                    created = await inventory.create_inventory_item(db, session.tenant_id, record.mapped_data)
-                    record.target_record_id = str(created.id)
-                
-                record.is_imported = True
-                imported_count += 1
-            except Exception as e:
-                record.is_imported = False
-                record.validation_errors = (record.validation_errors or []) + [f"Import Error: {str(e)}"]
-                
-        session.imported_records += imported_count
-        if session.imported_records == session.total_records:
-            session.status = MigrationJobStatus.IMPORT_SUCCESS
-        else:
-            session.status = MigrationJobStatus.PARTIAL_SUCCESS
-            
-        await db.commit()
         await db.refresh(session)
-        return session
+
+        if session.total_records > IMPORT_ASYNC_THRESHOLD:
+            # Large import: enqueue and return immediately. The client polls
+            # GET /migration/execution/{id}/status for progress instead of
+            # holding one HTTP request open for the whole import.
+            from app.tasks.migration_tasks import run_migration_import
+            run_migration_import.delay(str(session.id))
+            return session
+
+        return await execute_import_chunked(db, session)
