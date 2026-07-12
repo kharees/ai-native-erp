@@ -89,7 +89,10 @@ async def test_rbac_super_admin_bypass(async_client: AsyncClient, db_session: As
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     role_id = uuid.uuid4()
-    org_role = TenantRole(id=role_id, tenant_id=tenant_id, name="Organization Admin", is_system=False, hierarchy_level=100, created_at=now, updated_at=now)
+    # is_admin_bypass=True, not the role name, is what grants the bypass
+    # (see middleware/rbac.py and migration c6d8e0f2a4b7) — a role merely
+    # *named* "Organization Admin" with the flag unset must NOT bypass.
+    org_role = TenantRole(id=role_id, tenant_id=tenant_id, name="Organization Admin", is_system=False, hierarchy_level=100, is_admin_bypass=True, created_at=now, updated_at=now)
     db_session.add(org_role)
     org_user_role = TenantUserRole(id=uuid.uuid4(), tenant_id=tenant_id, user_id=up_id, role_id=role_id, created_at=now)
     db_session.add(org_user_role)
@@ -100,3 +103,35 @@ async def test_rbac_super_admin_bypass(async_client: AsyncClient, db_session: As
     
     response = await async_client.get("/api/v1/rbac/roles", headers=headers)
     assert response.status_code == 200 # Now they can list roles
+
+
+async def test_rbac_name_alone_does_not_grant_bypass(async_client: AsyncClient, db_session: AsyncSession, mock_jwt):
+    """Regression test for #6: a role named "Organization Admin" (or "Super
+    Admin") with is_admin_bypass unset must NOT bypass RBAC — the bypass is
+    keyed off the flag, not the name string. Previously any tenant admin
+    able to create a custom role (RBAC:Roles:Create) could self-escalate by
+    naming it "Super Admin"; this proves that no longer works."""
+    from app.middleware.rbac import _clear_permission_cache
+    _clear_permission_cache()
+    RequirePermission.__call__ = _real_require_permission_call
+    tenant_id, user_id = await setup_rbac_scenario(db_session)
+
+    up_id = (await db_session.execute(select(UserProfile.id).where(UserProfile.user_id == user_id))).scalar()
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    role_id = uuid.uuid4()
+    fake_admin_role = TenantRole(
+        id=role_id, tenant_id=tenant_id, name="Super Admin",
+        is_system=False, hierarchy_level=100, is_admin_bypass=False,
+        created_at=now, updated_at=now,
+    )
+    db_session.add(fake_admin_role)
+    db_session.add(TenantUserRole(id=uuid.uuid4(), tenant_id=tenant_id, user_id=up_id, role_id=role_id, created_at=now))
+    await db_session.flush()
+
+    token = mock_jwt(sub=str(user_id), tenant_id=str(tenant_id))
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": str(tenant_id)}
+
+    response = await async_client.get("/api/v1/rbac/roles", headers=headers)
+    assert response.status_code == 403

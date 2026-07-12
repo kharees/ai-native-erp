@@ -71,6 +71,10 @@ class TenantRole(Base):
     description = mapped_column(Text(), nullable=True, )
     is_system = mapped_column(Boolean(), nullable=False, server_default=text('FALSE'), )
     hierarchy_level = mapped_column(Integer(), nullable=False, server_default=text('100'), )
+    # Immutable admin-bypass flag (RequirePermission checks this, not the
+    # role name) — renaming a role, or a tenant admin creating a custom
+    # role named "Super Admin", can no longer grant/break the bypass.
+    is_admin_bypass = mapped_column(Boolean(), nullable=False, server_default=text('false'), )
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'), )
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'), )
     deleted_at = mapped_column(DateTime(timezone=True), nullable=True, )

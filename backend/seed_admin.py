@@ -17,17 +17,17 @@ async def _ensure_super_admin_role(session: AsyncSession, tenant_id, profile_id)
 
     UserProfile.role is a free-text label with no bearing on actual
     authorization - RequirePermission checks tenant_roles/tenant_user_roles
-    exclusively (looking for a role named "Super Admin" or "Organization
-    Admin"). Without this, the seeded admin account 403s on every
-    permission-gated endpoint despite UserProfile.role="admin" suggesting
-    otherwise.
+    exclusively (looking at TenantRole.is_admin_bypass, not the role name -
+    see migration c6d8e0f2a4b7). Without this, the seeded admin account
+    403s on every permission-gated endpoint despite UserProfile.role="admin"
+    suggesting otherwise.
     """
     role_result = await session.execute(
         select(TenantRole).where(TenantRole.tenant_id == tenant_id, TenantRole.name == "Super Admin")
     )
     role = role_result.scalar_one_or_none()
     if not role:
-        role = TenantRole(tenant_id=tenant_id, name="Super Admin", is_system=True, hierarchy_level=1)
+        role = TenantRole(tenant_id=tenant_id, name="Super Admin", is_system=True, hierarchy_level=1, is_admin_bypass=True)
         session.add(role)
         await session.commit()
         await session.refresh(role)

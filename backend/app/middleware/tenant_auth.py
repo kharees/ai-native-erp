@@ -201,7 +201,12 @@ def _is_bypass_route(request: Request) -> bool:
     path = request.url.path
     if path in _BYPASS_PATHS:
         return True
-    return any(path.startswith(prefix) for prefix in _BYPASS_PREFIXES)
+    # Exact-boundary match: a prefix only bypasses the prefix itself or a
+    # real path segment under it. `path.startswith(prefix)` alone would
+    # also match e.g. "/api/v1/authorizations" against the "/api/v1/auth"
+    # prefix (silently skipping tenant validation for a route that just
+    # happens to share a string prefix with an intentionally-public one).
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in _BYPASS_PREFIXES)
 
 
 # =============================================================================
@@ -501,7 +506,22 @@ class TenantAuthMiddleware(BaseHTTPMiddleware):
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,
-                algorithms=["HS256"],
+                # Was hardcoded to "HS256" — if settings.JWT_ALGORITHM were
+                # ever changed (e.g. migrating to RS256), tokens minted with
+                # the new algorithm would be rejected by this hardcoded value
+                # while everywhere else in the app (core/security.py,
+                # endpoints/auth.py) already reads the setting correctly.
+                algorithms=[settings.JWT_ALGORITHM],
+                # verify_aud is safe to disable *only* because every token
+                # this app currently accepts is self-issued by endpoints/auth.py,
+                # which never sets an "aud" claim. If real Supabase-issued
+                # JWTs are ever accepted here (they include "aud":"authenticated"
+                # by default), this must be re-enabled with an explicit
+                # `audience=` matching this project's ref — otherwise a token
+                # minted for a *different* Supabase project would still
+                # validate here as long as it's signed with the same shared
+                # secret pattern, since nothing checks which project it was
+                # issued for.
                 options={"verify_aud": False}
             )
             
