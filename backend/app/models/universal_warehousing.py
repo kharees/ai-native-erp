@@ -62,6 +62,23 @@ class UniversalStockBalance(Base):
     quantity_allocated = mapped_column(Numeric(15, 4), server_default='0.0000', nullable=False)
     last_transaction_at = mapped_column(DateTime(timezone=True), server_default=text('now()'), nullable=False)
 
+    # Two partial unique indexes (rather than one plain composite unique
+    # constraint) because Postgres treats NULL as distinct from itself in a
+    # regular UNIQUE constraint — bin_id is nullable, so a plain constraint
+    # would silently allow unlimited duplicate balance rows for any
+    # bin-less location. These close the get-or-create race in
+    # execute_stock_movement() at the DB level for both cases.
+    __table_args__ = (
+        Index(
+            'uq_stock_balance_location', 'tenant_id', 'item_id', 'warehouse_id', 'bin_id',
+            unique=True, postgresql_where=text('bin_id IS NOT NULL'),
+        ),
+        Index(
+            'uq_stock_balance_location_null_bin', 'tenant_id', 'item_id', 'warehouse_id',
+            unique=True, postgresql_where=text('bin_id IS NULL'),
+        ),
+    )
+
 class UniversalStockTransaction(Base):
     __tablename__ = 'universal_stock_transactions'
     id = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text('uuid_generate_v4()'))

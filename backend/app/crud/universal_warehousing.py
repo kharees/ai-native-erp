@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import select, func, update, exc, and_
+from sqlalchemy import select, func, update, exc, and_, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.universal_warehousing import (
     UniversalWarehouse,
@@ -81,35 +82,73 @@ async def list_bins(db: AsyncSession, tenant_id: uuid.UUID, limit: int, offset: 
 # -----------------
 # Stock Engine
 # -----------------
+async def _get_or_create_balance_locked(
+    db: AsyncSession, tenant_id: uuid.UUID, item_id: uuid.UUID,
+    warehouse_id: uuid.UUID, bin_id: uuid.UUID | None
+) -> UniversalStockBalance:
+    """
+    Get-or-create a UniversalStockBalance row for a location, race-free.
+
+    A plain "SELECT ... FOR UPDATE, INSERT if missing" cannot be made safe
+    with locking alone: FOR UPDATE locks rows that exist, so on a cache-cold
+    location two concurrent callers both see no row, both pass the check,
+    and both INSERT — the exact scenario in the original bug report. This
+    guarantees the row exists first (via INSERT ... ON CONFLICT DO NOTHING
+    against the partial unique indexes on UniversalStockBalance, see
+    migration a4b6c8d1e3f5) and only then locks it, so the second caller's
+    INSERT is a no-op and its SELECT ... FOR UPDATE simply blocks until the
+    first caller's transaction commits.
+    """
+    # Postgres requires the ON CONFLICT target to match a specific index;
+    # bin_id has two different partial unique indexes depending on whether
+    # it's NULL, so the conflict target must be chosen accordingly.
+    insert_stmt = pg_insert(UniversalStockBalance).values(
+        tenant_id=tenant_id,
+        item_id=item_id,
+        warehouse_id=warehouse_id,
+        bin_id=bin_id,
+        quantity_on_hand=Decimal("0"),
+    )
+    if bin_id is not None:
+        insert_stmt = insert_stmt.on_conflict_do_nothing(
+            index_elements=['tenant_id', 'item_id', 'warehouse_id', 'bin_id'],
+            index_where=text('bin_id IS NOT NULL'),
+        )
+    else:
+        insert_stmt = insert_stmt.on_conflict_do_nothing(
+            index_elements=['tenant_id', 'item_id', 'warehouse_id'],
+            index_where=text('bin_id IS NULL'),
+        )
+    await db.execute(insert_stmt)
+
+    bal_stmt = select(UniversalStockBalance).where(
+        UniversalStockBalance.tenant_id == tenant_id,
+        UniversalStockBalance.item_id == item_id,
+        UniversalStockBalance.warehouse_id == warehouse_id,
+        UniversalStockBalance.bin_id == bin_id,
+    ).with_for_update()
+    return (await db.execute(bal_stmt)).scalar_one()
+
+
 async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID | None, payload: StockMovementRequest) -> UniversalStockTransaction:
+    if payload.transaction_type == "TRANSFER" and not payload.destination_warehouse_id:
+        raise ValueError("TRANSFER requires destination_warehouse_id.")
+
     # 1. Create Transaction Record
+    # destination_* fields are transfer-routing instructions, not columns on
+    # UniversalStockTransaction (which records a single location's leg).
+    txn_data = payload.model_dump(by_alias=True, exclude={'destination_warehouse_id', 'destination_bin_id'})
     txn = UniversalStockTransaction(
         tenant_id=tenant_id,
         user_id=user_id,
-        **payload.model_dump(by_alias=True)
+        **txn_data
     )
     db.add(txn)
-    
-    # 2. Get or Create Balance Record
-    bal_stmt = select(UniversalStockBalance).where(
-        UniversalStockBalance.tenant_id == tenant_id,
-        UniversalStockBalance.item_id == payload.item_id,
-        UniversalStockBalance.warehouse_id == payload.warehouse_id,
-        UniversalStockBalance.bin_id == payload.bin_id
-    ).with_for_update() # Lock row for ACID
-    
-    balance = (await db.execute(bal_stmt)).scalar_one_or_none()
-    if not balance:
-        balance = UniversalStockBalance(
-            tenant_id=tenant_id,
-            item_id=payload.item_id,
-            warehouse_id=payload.warehouse_id,
-            bin_id=payload.bin_id,
-            quantity_on_hand=Decimal("0")
-        )
-        db.add(balance)
-        # Flush to get the record in session
-        await db.flush()
+
+    # 2. Get or Create Balance Record (race-free — see _get_or_create_balance_locked)
+    balance = await _get_or_create_balance_locked(
+        db, tenant_id, payload.item_id, payload.warehouse_id, payload.bin_id
+    )
 
     # 3. Apply Movement & Create Ledger Entry
     # balance.quantity_on_hand is a Numeric column (Decimal); payload.quantity is a
@@ -131,9 +170,12 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
         raise ValueError(f"Unknown transaction type: {payload.transaction_type}")
 
     # The negative check is enforced by PostgreSQL `quantity_on_hand >= 0` check constraint,
-    # but we can do a python level check for better error reporting.
+    # but we do a python level check first for a clean, catchable error: the
+    # old code raised sqlalchemy.exc.IntegrityError directly with statement/
+    # params set to None, which crashes any caller that catches IntegrityError
+    # and inspects `.orig` (a real DB-raised IntegrityError always has one).
     if balance.quantity_on_hand < 0:
-        raise exc.IntegrityError("Negative stock prevented", None, None)
+        raise ValueError("Negative stock prevented: insufficient quantity on hand at this location.")
         
     # --- PHASE 4: BATCH STOCK UPDATE ---
     if payload.batch_id:
@@ -234,12 +276,61 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
     ledger_entry.transaction_id = txn.id
     db.add(ledger_entry)
 
+    # --- TRANSFER: credit the destination location in the SAME transaction ---
+    # Previously TRANSFER only ever decremented the source balance — nothing
+    # credited a destination, so a transfer was indistinguishable from a
+    # write-off, and if the caller was expected to issue a second IN call
+    # separately, a crash between the two left stock destroyed with no
+    # atomicity. This does both legs under the one commit below.
+    if payload.transaction_type == "TRANSFER":
+        dest_balance = await _get_or_create_balance_locked(
+            db, tenant_id, payload.item_id,
+            payload.destination_warehouse_id, payload.destination_bin_id
+        )
+        dest_quantity_before = dest_balance.quantity_on_hand
+        dest_movement_qty = abs(movement_qty)
+        dest_balance.quantity_on_hand += dest_movement_qty
+
+        dest_txn = UniversalStockTransaction(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            item_id=payload.item_id,
+            warehouse_id=payload.destination_warehouse_id,
+            bin_id=payload.destination_bin_id,
+            batch_id=payload.batch_id,
+            serial_numbers=payload.serial_numbers,
+            transaction_type="TRANSFER_IN",
+            reference_type=payload.reference_type,
+            reference_id=payload.reference_id,
+            quantity=payload.quantity,
+            metadata_=payload.metadata_fields,
+        )
+        db.add(dest_txn)
+        await db.flush()
+
+        dest_ledger_entry = UniversalInventoryLedger(
+            tenant_id=tenant_id,
+            item_id=payload.item_id,
+            warehouse_id=payload.destination_warehouse_id,
+            bin_id=payload.destination_bin_id,
+            transaction_id=dest_txn.id,
+            quantity_before=dest_quantity_before,
+            movement_quantity=dest_movement_qty,
+            quantity_after=dest_balance.quantity_on_hand,
+            unit_cost=unit_cost_val,
+            total_cost=total_cost_val,
+            reference_type=payload.reference_type,
+            reference_id=payload.reference_id,
+            user_id=user_id,
+        )
+        db.add(dest_ledger_entry)
+
     try:
         await db.commit()
     except exc.IntegrityError:
         await db.rollback()
         raise
-        
+
     await db.refresh(txn)
     return txn
 

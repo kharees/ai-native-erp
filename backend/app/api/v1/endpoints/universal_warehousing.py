@@ -82,7 +82,16 @@ async def create_stock_transaction(request: Request, payload: schemas.StockMovem
         await db.commit() # Commit the audit log
         return txn
     except IntegrityError:
+        # get_db()'s db_session() wrapper rolls back automatically once this
+        # HTTPException propagates out of the route handler.
         raise _conflict("Transaction failed: Negative stock prevented or invalid constraints.")
+    except ValueError as e:
+        # Domain validation errors from execute_stock_movement (negative
+        # stock, missing TRANSFER destination, insufficient batch/serial
+        # stock) — previously only negative-stock was ever surfaced
+        # cleanly (via a misused IntegrityError); the other ValueError
+        # paths fell through to an unhandled 500.
+        raise _conflict(str(e))
 
 @router.post("/stock/reserve", response_model=schemas.StockBalanceResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(RequirePermission("UniversalInventory", "Stock", "Update"))])
 async def reserve_stock(request: Request, payload: schemas.StockMovementRequest, tenant_id: TenantIDDep, db: DBDep):

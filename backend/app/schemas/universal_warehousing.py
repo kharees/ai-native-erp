@@ -111,7 +111,12 @@ class StockMovementRequest(BaseModel):
     bin_id: uuid.UUID | None = None
     batch_id: uuid.UUID | None = None
     serial_numbers: list[str] | None = None
-    
+
+    # Required when transaction_type == "TRANSFER": the location stock is
+    # moving to. warehouse_id/bin_id above are treated as the source.
+    destination_warehouse_id: uuid.UUID | None = None
+    destination_bin_id: uuid.UUID | None = None
+
     transaction_type: str = Field(..., max_length=32)
     reference_type: str = Field(..., max_length=64)
     reference_id: str | None = Field(None, max_length=128)
