@@ -2,6 +2,11 @@
 const nextConfig = {
   reactStrictMode: true,
 
+  // Produces a minimal, self-contained .next/standalone output (its own
+  // node_modules subset + server.js) for the Docker image — without this,
+  // the production image would need to copy the entire node_modules tree.
+  output: "standalone",
+
   /**
    * Enable experimental server actions and partial pre-rendering
    * features available in Next.js 14.
