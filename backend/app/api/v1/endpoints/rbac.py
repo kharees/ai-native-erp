@@ -45,7 +45,7 @@ async def create_role(
         created_by=uuid.UUID(current_user_id) if current_user_id else None
     )
     db.add(db_role)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_role)
     return db_role
 
@@ -98,7 +98,7 @@ async def update_role(
     if current_user_id:
         db_role.updated_by = uuid.UUID(current_user_id)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(db_role)
     return db_role
 
@@ -129,7 +129,7 @@ async def delete_role(
     if current_user_id:
         db_role.updated_by = uuid.UUID(current_user_id)
         
-    await db.commit()
+    await db.flush()
     return None
 
 # ---------------------------------------------------------------------------
@@ -191,7 +191,7 @@ async def update_role_permissions_matrix(
             )
             db.add(db_rp)
             
-    await db.commit()
+    await db.flush()
     return {"message": "Permissions updated successfully"}
 
 # ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ async def assign_permission_to_role(
         created_by=uuid.UUID(current_user_id) if current_user_id else None
     )
     db.add(db_rp)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_rp)
     return db_rp
 
@@ -257,7 +257,7 @@ async def assign_role_to_user(
         created_by=uuid.UUID(current_user_id) if current_user_id else None
     )
     db.add(db_ur)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_ur)
     return db_ur
 

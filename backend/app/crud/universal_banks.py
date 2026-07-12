@@ -10,7 +10,7 @@ from app.schemas.universal_banks import (
 async def create_bank_account(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalBankAccountCreate) -> UniversalBankAccount:
     obj = UniversalBankAccount(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -31,7 +31,7 @@ async def create_bank_voucher(db: AsyncSession, tenant_id: uuid.UUID, payload: U
         elif payload.voucher_type == "PAYMENT":
             bank.current_balance -= payload.amount
             
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

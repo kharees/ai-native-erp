@@ -10,7 +10,7 @@ from app.schemas.universal_taxes import (
 async def create_tax_config(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalTaxConfigurationCreate) -> UniversalTaxConfiguration:
     obj = UniversalTaxConfiguration(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -22,7 +22,7 @@ async def list_tax_configs(db: AsyncSession, tenant_id: uuid.UUID, limit: int, o
 async def create_hsn_sac(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalHSNSACCreate) -> UniversalHSNSAC:
     obj = UniversalHSNSAC(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

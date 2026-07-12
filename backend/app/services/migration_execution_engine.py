@@ -20,7 +20,7 @@ class MigrationExecutionManager:
             raise ValueError("Session not found")
             
         session.status = MigrationJobStatus.IMPORTING
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
         
         # In a real app, you'd trigger a Celery task here.
@@ -37,7 +37,7 @@ class MigrationExecutionManager:
             raise ValueError("Session not found")
             
         session.status = MigrationJobStatus.PAUSED
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
         return session
 
@@ -50,7 +50,7 @@ class MigrationExecutionManager:
             raise ValueError("Session not found")
             
         session.status = MigrationJobStatus.IMPORTING
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
         return session
 
@@ -63,7 +63,7 @@ class MigrationExecutionManager:
             raise ValueError("Session not found")
             
         session.status = MigrationJobStatus.CANCELLING
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
         return session
 
@@ -82,7 +82,7 @@ class MigrationRollbackEngine:
             raise ValueError("Session not found")
             
         session.status = MigrationJobStatus.ROLLING_BACK
-        await db.commit()
+        await db.flush()
         
         records_stmt = select(MigrationDataRecord).where(MigrationDataRecord.session_id == session_id, MigrationDataRecord.is_imported == True)
         if partial and record_ids:
@@ -116,7 +116,7 @@ class MigrationRollbackEngine:
             failed_rollbacks=failed,
         )
         db.add(log)
-        await db.commit()
+        await db.flush()
         
         return log
 
@@ -159,7 +159,7 @@ class MigrationReconciliationEngine:
         )
         
         db.add(report)
-        await db.commit()
+        await db.flush()
         await db.refresh(report)
         
         return report

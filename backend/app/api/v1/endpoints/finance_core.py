@@ -52,7 +52,7 @@ async def create_account_group(
         db=db, request=request, action_category="FINANCE", action_type="CREATE_ACCOUNT_GROUP",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/account-groups", response_model=List[AccountGroupOut], dependencies=[Depends(RequirePermission("Finance", "AccountGroup", "Read"))])
@@ -84,7 +84,7 @@ async def update_account_group(request: Request, id: UUID, payload: AccountGroup
         db=db, request=request, action_category="FINANCE", action_type="UPDATE_ACCOUNT_GROUP",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result
 
 # --- Accounts (Chart of Accounts) ---
@@ -103,7 +103,7 @@ async def create_account(
         db=db, request=request, action_category="FINANCE", action_type="CREATE_ACCOUNT",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/accounts", response_model=List[AccountOut], dependencies=[Depends(RequirePermission("Finance", "Account", "Read"))])
@@ -135,7 +135,7 @@ async def update_account(request: Request, id: UUID, payload: AccountUpdate, db:
         db=db, request=request, action_category="FINANCE", action_type="UPDATE_ACCOUNT",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result
 
 # --- Journal Vouchers ---
@@ -155,7 +155,7 @@ async def create_journal_voucher(
         db=db, request=request, action_category="FINANCE", action_type="CREATE_JOURNAL_VOUCHER",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/journals", response_model=List[JournalVoucherOut], dependencies=[Depends(RequirePermission("Finance", "Journal", "Read"))])
@@ -201,5 +201,5 @@ async def approve_journal_voucher(
         db=db, request=request, action_category="FINANCE", action_type="APPROVE_JOURNAL_VOUCHER",
         resource_id=str(result.id)
     )
-    await db.commit()
+    await db.flush()
     return result

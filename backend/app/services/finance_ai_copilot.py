@@ -49,7 +49,7 @@ class FinanceAICopilotService:
             context_used="MOCK_ALGORITHMIC_HEURISTIC_ENGINE"
         )
         db.add(log_entry)
-        await db.commit()
+        await db.flush()
         
         return AIChatResponse(response=response_text, confidence=confidence)
 
@@ -83,7 +83,7 @@ class FinanceAICopilotService:
         for insight in new_insights:
             db.add(insight)
             
-        await db.commit()
+        await db.flush()
         return new_insights
 
     async def get_insights(self, db: AsyncSession, tenant_id: UUID, skip: int = 0, limit: int = 50) -> List[AIFinanceInsight]:

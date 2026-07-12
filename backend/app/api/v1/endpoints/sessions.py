@@ -93,7 +93,7 @@ async def revoke_session(
         new_values={"is_active": False}
     )
     
-    await db.commit()
+    await db.flush()
     return None
 
 @router.delete("/me/all", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -126,7 +126,7 @@ async def revoke_all_other_sessions(
         resource_id=str(user_id)
     )
     
-    await db.commit()
+    await db.flush()
     return None
 
 # ---------------------------------------------------------------------------
@@ -182,6 +182,6 @@ async def trust_device(
         new_values={"is_trusted": True}
     )
     
-    await db.commit()
+    await db.flush()
     await db.refresh(device)
     return device

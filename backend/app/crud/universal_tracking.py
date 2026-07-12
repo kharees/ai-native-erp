@@ -12,7 +12,7 @@ from app.schemas.universal_tracking import UniversalBatchMasterCreate, Universal
 async def create_batch(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalBatchMasterCreate) -> UniversalBatchMaster:
     obj = UniversalBatchMaster(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

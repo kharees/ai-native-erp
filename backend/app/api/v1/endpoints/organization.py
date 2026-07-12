@@ -61,7 +61,7 @@ async def update_organization_settings(
     for key, value in update_dict.items():
         setattr(tenant, key, value)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(tenant)
     return tenant
 
@@ -76,7 +76,7 @@ async def create_branch(
 ):
     db_branch = TenantBranch(**branch.model_dump(), tenant_id=tenant_id)
     db.add(db_branch)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_branch)
     return db_branch
 
@@ -110,7 +110,7 @@ async def update_branch(
     for key, value in update_dict.items():
         setattr(db_branch, key, value)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(db_branch)
     return db_branch
 
@@ -125,7 +125,7 @@ async def create_department(
 ):
     db_dept = TenantDepartment(**dept.model_dump(), tenant_id=tenant_id)
     db.add(db_dept)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_dept)
     return db_dept
 
@@ -159,7 +159,7 @@ async def update_department(
     for key, value in update_dict.items():
         setattr(db_dept, key, value)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(db_dept)
     return db_dept
 
@@ -174,7 +174,7 @@ async def create_warehouse(
 ):
     db_wh = TenantWarehouse(**warehouse.model_dump(), tenant_id=tenant_id)
     db.add(db_wh)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_wh)
     return db_wh
 
@@ -208,6 +208,6 @@ async def update_warehouse(
     for key, value in update_dict.items():
         setattr(db_wh, key, value)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(db_wh)
     return db_wh

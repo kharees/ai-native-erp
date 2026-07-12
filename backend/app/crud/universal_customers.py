@@ -23,7 +23,7 @@ async def get_paginated(db: AsyncSession, model, tenant_id: uuid.UUID, limit: in
 async def create_group(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalCustomerGroupCreate) -> UniversalCustomerGroup:
     obj = UniversalCustomerGroup(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -34,7 +34,7 @@ async def update_group(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID, pa
     obj = await get_group(db, tenant_id, id)
     if not obj: return None
     for k, v in payload.model_dump(exclude_unset=True).items(): setattr(obj, k, v)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -42,7 +42,7 @@ async def update_group(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID, pa
 async def create_customer(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalCustomerCreate) -> UniversalCustomer:
     obj = UniversalCustomer(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -59,7 +59,7 @@ async def update_customer(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID,
     obj = await get_customer(db, tenant_id, id)
     if not obj: return None
     for k, v in payload.model_dump(exclude_unset=True).items(): setattr(obj, k, v)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -67,5 +67,5 @@ async def delete_customer(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID)
     obj = await get_customer(db, tenant_id, id)
     if not obj: return False
     await db.delete(obj)
-    await db.commit()
+    await db.flush()
     return True

@@ -30,7 +30,7 @@ async def create_payment_receipt(db: AsyncSession, tenant_id: uuid.UUID, payload
         # freshly-constructed-object path instead.
         wallet.balance += Decimal(str(obj.unallocated_amount))
 
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -51,14 +51,14 @@ async def create_payment_allocation(db: AsyncSession, tenant_id: uuid.UUID, payl
         if wallet:
             wallet.balance -= payload.allocated_amount
 
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
 async def create_refund(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalRefundCreate) -> UniversalRefund:
     obj = UniversalRefund(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

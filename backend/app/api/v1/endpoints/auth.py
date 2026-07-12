@@ -130,7 +130,7 @@ async def login(
             expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         )
         db.add(new_session)
-        await db.commit()
+        await db.flush()
         await db.refresh(new_session)
         session_id = str(new_session.id)
 
@@ -293,7 +293,7 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
                 session_obj = result.scalar_one_or_none()
                 if session_obj:
                     session_obj.is_active = False
-                    await db.commit()
+                    await db.flush()
         except JWTError:
             pass
 

@@ -7,7 +7,7 @@ from app.schemas.universal_numbering import UniversalNumberSeriesCreate, Univers
 async def create_series(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalNumberSeriesCreate) -> UniversalNumberSeries:
     obj = UniversalNumberSeries(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -37,5 +37,5 @@ async def generate_next_number(db: AsyncSession, tenant_id: uuid.UUID, entity_ty
         formatted += f"/{series.financial_year}"
     formatted += f"/{seq_str}"
     
-    await db.commit()
+    await db.flush()
     return formatted

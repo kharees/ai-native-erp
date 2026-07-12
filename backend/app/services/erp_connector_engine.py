@@ -117,6 +117,12 @@ class ERPConnectorEngine:
         connector.health_status = status
         
         if status == "FAILED" or not data:
+            # Must be a real commit, not flush: we're about to raise, and the
+            # request-scoped session (get_db/db_session) rolls back on any
+            # exception. Without committing here first, the failure log and
+            # connector health-status update this branch just wrote would be
+            # wiped out by that rollback — the one thing we need to survive
+            # a failed sync is the record that it failed.
             await db.commit()
             raise ValueError(f"Sync failed or no data returned: {error_message}")
             
@@ -146,7 +152,7 @@ class ERPConnectorEngine:
             records.append(record)
             
         db.add_all(records)
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
-        
+
         return session

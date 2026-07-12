@@ -21,7 +21,7 @@ class CRUDFinancePhase2:
     async def create_ar_ledger(self, db: AsyncSession, obj_in: ARLedgerCreate) -> ARLedger:
         db_obj = ARLedger(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -32,7 +32,7 @@ class CRUDFinancePhase2:
     async def create_ar_collection(self, db: AsyncSession, obj_in: ARCollectionCreate) -> ARCollection:
         db_obj = ARCollection(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -43,7 +43,7 @@ class CRUDFinancePhase2:
     async def create_ar_receipt(self, db: AsyncSession, obj_in: ARReceiptCreate) -> ARReceipt:
         db_obj = ARReceipt(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -55,7 +55,7 @@ class CRUDFinancePhase2:
     async def create_ap_vendor(self, db: AsyncSession, obj_in: APVendorCreate) -> APVendor:
         db_obj = APVendor(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -66,7 +66,7 @@ class CRUDFinancePhase2:
     async def create_ap_bill(self, db: AsyncSession, obj_in: APBillCreate) -> APBill:
         db_obj = APBill(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -77,7 +77,7 @@ class CRUDFinancePhase2:
     async def create_ap_payment(self, db: AsyncSession, obj_in: APPaymentCreate) -> APPayment:
         db_obj = APPayment(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -89,7 +89,7 @@ class CRUDFinancePhase2:
     async def create_cash_account(self, db: AsyncSession, obj_in: CashAccountCreate) -> CashAccount:
         db_obj = CashAccount(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -100,7 +100,7 @@ class CRUDFinancePhase2:
     async def create_bank_reconciliation(self, db: AsyncSession, obj_in: BankReconciliationCreate) -> BankReconciliation:
         db_obj = BankReconciliation(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -112,7 +112,7 @@ class CRUDFinancePhase2:
     async def create_expense_category(self, db: AsyncSession, obj_in: ExpenseCategoryCreate) -> ExpenseCategory:
         db_obj = ExpenseCategory(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -123,7 +123,7 @@ class CRUDFinancePhase2:
     async def create_expense_claim(self, db: AsyncSession, obj_in: ExpenseClaimCreate) -> ExpenseClaim:
         db_obj = ExpenseClaim(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 

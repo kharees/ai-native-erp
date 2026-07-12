@@ -10,7 +10,7 @@ from app.schemas.universal_pos import (
 async def create_pos_session(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalPOSSessionCreate) -> UniversalPOSSession:
     obj = UniversalPOSSession(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -22,7 +22,7 @@ async def list_pos_sessions(db: AsyncSession, tenant_id: uuid.UUID, limit: int, 
 async def create_hold_bill(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalPOSHoldBillCreate) -> UniversalPOSHoldBill:
     obj = UniversalPOSHoldBill(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

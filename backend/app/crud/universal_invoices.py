@@ -21,7 +21,7 @@ async def create_proforma_invoice(db: AsyncSession, tenant_id: uuid.UUID, payloa
     for item in items_data:
         db.add(UniversalProformaInvoiceItem(tenant_id=tenant_id, pi_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -44,7 +44,7 @@ async def create_tax_invoice(db: AsyncSession, tenant_id: uuid.UUID, payload: Un
     for item in items_data:
         db.add(UniversalTaxInvoiceItem(tenant_id=tenant_id, invoice_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

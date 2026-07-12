@@ -36,7 +36,7 @@ async def calculate_credit_risk(db: AsyncSession, tenant_id: uuid.UUID, customer
         confidence_score=0.92
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
 
     return AICreditRiskScoreResponse(
         customer_id=customer_id,
@@ -56,7 +56,7 @@ async def generate_smart_draft(db: AsyncSession, tenant_id: uuid.UUID, payload: 
         confidence_score=0.88
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
 
     return AISmartDraftResponse(
         suggested_products=[{"item_name": "Premium Bundle Add-on", "suggested_price": 99.99}],

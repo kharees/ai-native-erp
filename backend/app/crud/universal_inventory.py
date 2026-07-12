@@ -31,7 +31,7 @@ async def get_paginated(
 async def create_category(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalCategoryCreate) -> UniversalCategory:
     obj = UniversalCategory(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -48,20 +48,20 @@ async def update_category(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID,
         return await get_category(db, tenant_id, id)
     stmt = update(UniversalCategory).where(UniversalCategory.id == id, UniversalCategory.tenant_id == tenant_id).values(**update_data).returning(UniversalCategory)
     res = (await db.execute(stmt)).scalar_one_or_none()
-    await db.commit()
+    await db.flush()
     return res
 
 async def delete_category(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> bool:
     stmt = update(UniversalCategory).where(UniversalCategory.id == id, UniversalCategory.tenant_id == tenant_id).values(is_active=False)
     res = await db.execute(stmt)
-    await db.commit()
+    await db.flush()
     return res.rowcount > 0
 
 # Brand CRUD
 async def create_brand(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalBrandCreate) -> UniversalBrand:
     obj = UniversalBrand(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -78,20 +78,20 @@ async def update_brand(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID, pa
         return await get_brand(db, tenant_id, id)
     stmt = update(UniversalBrand).where(UniversalBrand.id == id, UniversalBrand.tenant_id == tenant_id).values(**update_data).returning(UniversalBrand)
     res = (await db.execute(stmt)).scalar_one_or_none()
-    await db.commit()
+    await db.flush()
     return res
 
 async def delete_brand(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> bool:
     stmt = update(UniversalBrand).where(UniversalBrand.id == id, UniversalBrand.tenant_id == tenant_id).values(is_active=False)
     res = await db.execute(stmt)
-    await db.commit()
+    await db.flush()
     return res.rowcount > 0
 
 # UOM CRUD
 async def create_uom(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalUOMCreate) -> UniversalUOM:
     obj = UniversalUOM(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -108,13 +108,13 @@ async def update_uom(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID, payl
         return await get_uom(db, tenant_id, id)
     stmt = update(UniversalUOM).where(UniversalUOM.id == id, UniversalUOM.tenant_id == tenant_id).values(**update_data).returning(UniversalUOM)
     res = (await db.execute(stmt)).scalar_one_or_none()
-    await db.commit()
+    await db.flush()
     return res
 
 async def delete_uom(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> bool:
     stmt = update(UniversalUOM).where(UniversalUOM.id == id, UniversalUOM.tenant_id == tenant_id).values(is_active=False)
     res = await db.execute(stmt)
-    await db.commit()
+    await db.flush()
     return res.rowcount > 0
 
 # Item Master CRUD
@@ -125,11 +125,7 @@ async def create_item(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID
         **payload.model_dump()
     )
     db.add(obj)
-    try:
-        await db.commit()
-    except exc.IntegrityError:
-        await db.rollback()
-        raise
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -173,16 +169,12 @@ async def update_item(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID
     update_data["updated_by"] = user_id
     stmt = update(UniversalItemMaster).where(UniversalItemMaster.id == id, UniversalItemMaster.tenant_id == tenant_id).values(**update_data).returning(UniversalItemMaster)
     
-    try:
-        res = (await db.execute(stmt)).scalar_one_or_none()
-        await db.commit()
-    except exc.IntegrityError:
-        await db.rollback()
-        raise
+    res = (await db.execute(stmt)).scalar_one_or_none()
+    await db.flush()
     return res
 
 async def delete_item(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> bool:
     stmt = update(UniversalItemMaster).where(UniversalItemMaster.id == id, UniversalItemMaster.tenant_id == tenant_id).values(is_active=False)
     res = await db.execute(stmt)
-    await db.commit()
+    await db.flush()
     return res.rowcount > 0

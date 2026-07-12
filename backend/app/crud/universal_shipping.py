@@ -9,7 +9,7 @@ from app.schemas.universal_shipping import (
 async def create_shipping_courier(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalShippingCourierCreate) -> UniversalShippingCourier:
     obj = UniversalShippingCourier(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -21,7 +21,7 @@ async def list_shipping_couriers(db: AsyncSession, tenant_id: uuid.UUID, limit: 
 async def create_order_dispatch(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalOrderDispatchCreate) -> UniversalOrderDispatch:
     obj = UniversalOrderDispatch(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

@@ -48,7 +48,7 @@ async def create_connector(
         is_active=payload.is_active
     )
     db.add(connector)
-    await db.commit()
+    await db.flush()
     await db.refresh(connector)
     await AuditLogger.log_action(db=db, request=request, action_category="ERP_CONNECTOR", action_type="CREATE", resource_id=str(connector.id))
     return connector
@@ -89,7 +89,7 @@ async def update_connector(
     if payload.is_active is not None:
         connector.is_active = payload.is_active
         
-    await db.commit()
+    await db.flush()
     await db.refresh(connector)
     await AuditLogger.log_action(db=db, request=request, action_category="ERP_CONNECTOR", action_type="UPDATE", resource_id=str(connector.id))
     return connector
@@ -108,7 +108,7 @@ async def delete_connector(
         raise HTTPException(status_code=404, detail="Connector not found")
         
     await db.delete(connector)
-    await db.commit()
+    await db.flush()
     await AuditLogger.log_action(db=db, request=request, action_category="ERP_CONNECTOR", action_type="DELETE", resource_id=str(connector_id))
 
 @router.post("/{connector_id}/test", response_model=ConnectorHealthCheckOut)
@@ -128,7 +128,7 @@ async def test_connector(
     result = await erp.test_connection()
     
     connector.health_status = result["status"]
-    await db.commit()
+    await db.flush()
     
     return result
 

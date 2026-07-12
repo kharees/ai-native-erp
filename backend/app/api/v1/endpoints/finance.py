@@ -60,7 +60,7 @@ async def record_transaction(
     
     db.add(db_ledger)
     try:
-        await db.commit()
+        await db.flush()
         await db.refresh(db_ledger)
         log.info(
             "finance_transaction_recorded", 

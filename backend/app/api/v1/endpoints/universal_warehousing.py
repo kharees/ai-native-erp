@@ -79,7 +79,7 @@ async def create_stock_transaction(request: Request, payload: schemas.StockMovem
             resource_id=str(txn.id),
             new_values=payload.model_dump(mode='json')
         )
-        await db.commit() # Commit the audit log
+        await db.flush() # Persist the audit log alongside the stock movement
         return txn
     except IntegrityError:
         # get_db()'s db_session() wrapper rolls back automatically once this
@@ -105,7 +105,7 @@ async def reserve_stock(request: Request, payload: schemas.StockMovementRequest,
             resource_id=str(balance.id),
             new_values=payload.model_dump(mode='json')
         )
-        await db.commit()
+        await db.flush()
         return balance
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -122,7 +122,7 @@ async def allocate_stock(request: Request, payload: schemas.StockMovementRequest
             resource_id=str(balance.id),
             new_values=payload.model_dump(mode='json')
         )
-        await db.commit()
+        await db.flush()
         return balance
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

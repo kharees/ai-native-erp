@@ -61,6 +61,12 @@ async def claim_idempotency_key(
     db.add(claim_row)
     try:
         await db.flush()
+        # Must be a real commit, not flush: this claim row is how a second,
+        # concurrent request with the same key gets rejected below (via the
+        # IntegrityError on the unique constraint) instead of racing this one
+        # through resource creation. flush() only makes the row visible on
+        # this connection's own open transaction — a concurrent request runs
+        # on a different session and cannot see it until this commits.
         await db.commit()
         return IdempotencyClaim(should_complete=True)
     except IntegrityError:
@@ -97,4 +103,12 @@ async def complete_idempotency_key(
     row.status = "completed"
     row.resource_id = resource_id
     row.response_body = response_body
-    await db.commit()
+    # Deliberately flush, not commit: the caller (see module docstring)
+    # calls this right after creating the resource, in the same request. A
+    # flush keeps "resource created" and "idempotency key marked complete"
+    # in one transaction, committed together at the end of the request by
+    # get_db()'s unit-of-work. Previously these were two independent
+    # commits — a crash between them could leave a created resource with no
+    # completed idempotency record, so a client retry would create a
+    # second, duplicate resource, defeating the whole point of this module.
+    await db.flush()

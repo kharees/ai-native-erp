@@ -81,7 +81,7 @@ async def create_invoice(
     # 3. Commit to database
     db.add(db_invoice)
     try:
-        await db.commit()
+        await db.flush()
         await db.refresh(db_invoice)
         log.info("invoice_created", invoice_number=db_invoice.invoice_number, tenant_id=str(tenant_id))
         return db_invoice

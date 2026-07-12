@@ -42,7 +42,7 @@ async def create_ar_ledger(request: Request, payload: ARLedgerCreate, db: AsyncS
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ar_ledger(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AR_LEDGER", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ar/ledgers", response_model=List[ARLedgerOut], dependencies=[Depends(RequirePermission("Finance", "ARLedger", "Read"))])
@@ -57,7 +57,7 @@ async def create_ar_collection(request: Request, payload: ARCollectionCreate, db
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ar_collection(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AR_COLLECTION", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ar/collections", response_model=List[ARCollectionOut], dependencies=[Depends(RequirePermission("Finance", "ARCollection", "Read"))])
@@ -72,7 +72,7 @@ async def create_ar_receipt(request: Request, payload: ARReceiptCreate, db: Asyn
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ar_receipt(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AR_RECEIPT", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ar/receipts", response_model=List[ARReceiptOut], dependencies=[Depends(RequirePermission("Finance", "ARReceipt", "Read"))])
@@ -88,7 +88,7 @@ async def create_ap_vendor(request: Request, payload: APVendorCreate, db: AsyncS
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ap_vendor(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AP_VENDOR", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ap/vendors", response_model=List[APVendorOut], dependencies=[Depends(RequirePermission("Finance", "APVendor", "Read"))])
@@ -103,7 +103,7 @@ async def create_ap_bill(request: Request, payload: APBillCreate, db: AsyncSessi
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ap_bill(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AP_BILL", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ap/bills", response_model=List[APBillOut], dependencies=[Depends(RequirePermission("Finance", "APBill", "Read"))])
@@ -118,7 +118,7 @@ async def create_ap_payment(request: Request, payload: APPaymentCreate, db: Asyn
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_ap_payment(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_AP_PAYMENT", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/ap/payments", response_model=List[APPaymentOut], dependencies=[Depends(RequirePermission("Finance", "APPayment", "Read"))])
@@ -134,7 +134,7 @@ async def create_cash_account(request: Request, payload: CashAccountCreate, db: 
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_cash_account(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_CASH_ACCOUNT", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/cash-accounts", response_model=List[CashAccountOut], dependencies=[Depends(RequirePermission("Finance", "CashAccount", "Read"))])
@@ -149,7 +149,7 @@ async def create_bank_reconciliation(request: Request, payload: BankReconciliati
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_bank_reconciliation(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_BANK_RECONCILIATION", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/banking/reconciliations", response_model=List[BankReconciliationOut], dependencies=[Depends(RequirePermission("Finance", "BankReconciliation", "Read"))])
@@ -165,7 +165,7 @@ async def create_expense_category(request: Request, payload: ExpenseCategoryCrea
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_phase2.create_expense_category(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_EXPENSE_CATEGORY", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/expenses/categories", response_model=List[ExpenseCategoryOut], dependencies=[Depends(RequirePermission("Finance", "ExpenseCategory", "Read"))])
@@ -181,7 +181,7 @@ async def create_expense_claim(request: Request, payload: ExpenseClaimCreate, db
     payload.user_id = get_user_id(request) # Force context user
     result = await finance_phase2.create_expense_claim(db, payload)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE", action_type="CREATE_EXPENSE_CLAIM", resource_id=str(result.id))
-    await db.commit()
+    await db.flush()
     return result
 
 @router.get("/expenses/claims", response_model=List[ExpenseClaimOut], dependencies=[Depends(RequirePermission("Finance", "ExpenseClaim", "Read"))])

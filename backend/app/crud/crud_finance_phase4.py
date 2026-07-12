@@ -21,7 +21,7 @@ class CRUDFinancePhase4:
     async def create_asset_category(self, db: AsyncSession, obj_in: FixedAssetCategoryCreate) -> FixedAssetCategory:
         db_obj = FixedAssetCategory(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -32,7 +32,7 @@ class CRUDFinancePhase4:
     async def create_fixed_asset(self, db: AsyncSession, obj_in: FixedAssetCreate) -> FixedAsset:
         db_obj = FixedAsset(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -100,7 +100,7 @@ class CRUDFinancePhase4:
                 # Note: In a full system, here we would also call Phase 1 CRUD to generate
                 # the automated Journal Voucher for Depreciation Expense vs Accumulated Depreciation
                 
-        await db.commit()
+        await db.flush()
         return {
             "assets_depreciated": depreciated_count,
             "total_depreciation_amount": float(total_depreciation)
@@ -110,7 +110,7 @@ class CRUDFinancePhase4:
     async def create_cost_center(self, db: AsyncSession, obj_in: CostCenterCreate) -> CostCenter:
         db_obj = CostCenter(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -121,7 +121,7 @@ class CRUDFinancePhase4:
     async def create_profit_center(self, db: AsyncSession, obj_in: ProfitCenterCreate) -> ProfitCenter:
         db_obj = ProfitCenter(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 
@@ -146,7 +146,7 @@ class CRUDFinancePhase4:
             )
             db.add(db_line)
             
-        await db.commit()
+        await db.flush()
         await db.refresh(db_budget)
         return db_budget
 
@@ -157,7 +157,7 @@ class CRUDFinancePhase4:
     async def create_forecast(self, db: AsyncSession, obj_in: ForecastCreate) -> Forecast:
         db_obj = Forecast(**obj_in.model_dump())
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 

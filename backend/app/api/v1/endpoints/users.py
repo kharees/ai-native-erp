@@ -109,7 +109,7 @@ async def provision_user(
         is_active=True
     )
     db.add(new_account)
-    await db.commit()
+    await db.flush()
     await db.refresh(new_account)
 
     # 2. Create UserProfile
@@ -121,7 +121,7 @@ async def provision_user(
         created_by=current_user_id if current_user_id else None
     )
     db.add(db_user)
-    await db.commit()
+    await db.flush()
     await db.refresh(db_user)
     
     # 3. Assign Roles
@@ -134,7 +134,7 @@ async def provision_user(
         )
         db.add(new_user_role)
     if user_in.roles:
-        await db.commit()
+        await db.flush()
 
     response_data = db_user.__dict__.copy()
     response_data["email"] = new_account.email
@@ -248,7 +248,7 @@ async def update_user_profile(
         db_user.updated_by = current_user_id
     db_user.updated_at = datetime.now(timezone.utc)
         
-    await db.commit()
+    await db.flush()
     await db.refresh(db_user)
     
     response_data = db_user.__dict__.copy()
@@ -303,5 +303,5 @@ async def delete_user(
     if acc:
         acc.is_active = False
         
-    await db.commit()
+    await db.flush()
     return None

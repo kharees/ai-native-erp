@@ -21,7 +21,7 @@ async def create_delivery_challan(db: AsyncSession, tenant_id: uuid.UUID, payloa
     for item in items_data:
         db.add(UniversalDeliveryChallanItem(tenant_id=tenant_id, challan_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -41,7 +41,7 @@ async def create_packing_slip(db: AsyncSession, tenant_id: uuid.UUID, payload: U
     for item in items_data:
         db.add(UniversalPackingSlipItem(tenant_id=tenant_id, slip_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

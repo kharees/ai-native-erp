@@ -24,7 +24,7 @@ from app.schemas.universal_warehousing import (
 async def create_warehouse(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalWarehouseCreate) -> UniversalWarehouse:
     obj = UniversalWarehouse(tenant_id=tenant_id, **payload.model_dump(by_alias=True))
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -49,7 +49,7 @@ async def list_warehouses(db: AsyncSession, tenant_id: uuid.UUID, limit: int, of
 async def create_bin(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalWarehouseBinCreate) -> UniversalWarehouseBin:
     obj = UniversalWarehouseBin(tenant_id=tenant_id, **payload.model_dump(by_alias=True))
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -316,12 +316,7 @@ async def execute_stock_movement(db: AsyncSession, tenant_id: uuid.UUID, user_id
         )
         db.add(dest_ledger_entry)
 
-    try:
-        await db.commit()
-    except exc.IntegrityError:
-        await db.rollback()
-        raise
-
+    await db.flush()
     await db.refresh(txn)
     return txn
 
@@ -342,7 +337,7 @@ async def reserve_stock(db: AsyncSession, tenant_id: uuid.UUID, payload: StockMo
     if balance.quantity_on_hand < balance.quantity_reserved + balance.quantity_allocated:
         raise ValueError("Insufficient available stock for reservation")
         
-    await db.commit()
+    await db.flush()
     await db.refresh(balance)
     return balance
 
@@ -365,6 +360,6 @@ async def allocate_stock(db: AsyncSession, tenant_id: uuid.UUID, payload: StockM
     if balance.quantity_on_hand < balance.quantity_reserved + balance.quantity_allocated:
         raise ValueError("Insufficient available stock for allocation")
         
-    await db.commit()
+    await db.flush()
     await db.refresh(balance)
     return balance

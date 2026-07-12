@@ -91,6 +91,13 @@ async def execute_import_chunked(db: AsyncSession, session: MigrationSession, ch
     small-session path and inside the Celery task for large sessions — the
     only difference is which caller awaits it and whether the caller can
     wait for the return value before responding to its own client.
+
+    Deliberate exception to the flush-only unit-of-work convention used
+    everywhere else in app/crud and app/services: a bulk import is not one
+    atomic business operation, it's a resumable batch job, and per-chunk
+    commits are the checkpointing mechanism that makes a crash mid-import
+    (or a Celery retry) resume instead of restart. See
+    app/tasks/migration_tasks.py's retry-semantics docstring.
     """
     records_stmt = select(MigrationDataRecord).where(
         MigrationDataRecord.session_id == session.id,
@@ -179,7 +186,7 @@ class MigrationEngine:
             records.append(record)
             
         db.add_all(records)
-        await db.commit()
+        await db.flush()
         await db.refresh(session)
         return session
 
@@ -199,8 +206,8 @@ class MigrationEngine:
         session.status = MigrationJobStatus.VALIDATING
         if mapping_config:
             session.mapping_config = mapping_config
-        await db.commit()
-        
+        await db.flush()
+
         # Fetch all records
         records_stmt = select(MigrationDataRecord).where(MigrationDataRecord.session_id == session_id)
         records_result = await db.execute(records_stmt)
@@ -274,8 +281,8 @@ class MigrationEngine:
         
         if validation_logs:
             db.add_all(validation_logs)
-            
-        await db.commit()
+
+        await db.flush()
         await db.refresh(session)
         return session
 
@@ -292,6 +299,12 @@ class MigrationEngine:
             raise HTTPException(status_code=400, detail="Session must be validated before import")
 
         session.status = MigrationJobStatus.IMPORTING
+        # A real commit (not flush) is required here, not just request-scoped
+        # unit-of-work hygiene: below, run_migration_import.delay() hands this
+        # session_id to a Celery worker running in a separate process with its
+        # own DB connection. flush() only makes rows visible on *this*
+        # connection/transaction — the worker cannot see them until this
+        # transaction actually commits.
         await db.commit()
         await db.refresh(session)
 

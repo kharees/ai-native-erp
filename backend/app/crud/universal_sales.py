@@ -20,7 +20,7 @@ async def create_quotation(db: AsyncSession, tenant_id: uuid.UUID, payload: Univ
     for item in items_data:
         db.add(UniversalSalesQuotationItem(tenant_id=tenant_id, quotation_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -47,7 +47,7 @@ async def create_order(db: AsyncSession, tenant_id: uuid.UUID, payload: Universa
     for item in items_data:
         db.add(UniversalSalesOrderItem(tenant_id=tenant_id, order_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -91,7 +91,7 @@ async def convert_from_quote(db: AsyncSession, tenant_id: uuid.UUID, quote_id: u
         ))
         
     quote.status = 'CONVERTED'
-    await db.commit()
+    await db.flush()
     await db.refresh(order)
     return order
 
@@ -100,7 +100,7 @@ async def approve_order(db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.U
     if not order: return None
     order.approval_status = 'APPROVED'
     order.status = 'CONFIRMED'
-    await db.commit()
+    await db.flush()
     await db.refresh(order)
     return order
 
@@ -110,7 +110,7 @@ from app.schemas.universal_sales import UniversalCustomerPriceListCreate, Univer
 async def create_price_list(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalCustomerPriceListCreate) -> UniversalCustomerPriceList:
     obj = UniversalCustomerPriceList(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

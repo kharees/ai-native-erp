@@ -23,7 +23,7 @@ async def create_credit_note(db: AsyncSession, tenant_id: uuid.UUID, payload: Un
     for item in items_data:
         db.add(UniversalCreditNoteItem(tenant_id=tenant_id, note_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -43,7 +43,7 @@ async def create_debit_note(db: AsyncSession, tenant_id: uuid.UUID, payload: Uni
     for item in items_data:
         db.add(UniversalDebitNoteItem(tenant_id=tenant_id, note_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -63,7 +63,7 @@ async def create_sales_return(db: AsyncSession, tenant_id: uuid.UUID, payload: U
     for item in items_data:
         db.add(UniversalSalesReturnItem(tenant_id=tenant_id, return_id=obj.id, **item))
         
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 

@@ -212,7 +212,7 @@ async def ingest_inventory_node(
 
     # 3. Commit to session and refresh
     db.add(node)
-    await db.commit()
+    await db.flush()
     await db.refresh(node)
 
     bound_log.info(

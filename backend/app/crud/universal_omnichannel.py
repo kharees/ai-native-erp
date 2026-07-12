@@ -9,7 +9,7 @@ from app.schemas.universal_omnichannel import (
 async def create_channel_config(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalChannelConfigurationCreate) -> UniversalChannelConfiguration:
     obj = UniversalChannelConfiguration(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
@@ -21,7 +21,7 @@ async def list_channel_configs(db: AsyncSession, tenant_id: uuid.UUID, limit: in
 async def create_order_mapping(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalOrderChannelMappingCreate) -> UniversalOrderChannelMapping:
     obj = UniversalOrderChannelMapping(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
-    await db.commit()
+    await db.flush()
     await db.refresh(obj)
     return obj
 
