@@ -49,27 +49,68 @@ available before relying on this for a production-scale import.
 Two separate readiness gaps were named. Assessed both; fixed what was safe
 to fix at foundation scope, documented the rest.
 
-### Unit-of-work
+### Unit-of-work — RESOLVED (Sprint 5 #1)
 
 Sprint 1 moved `crud_finance_core.py` off per-function `db.commit()` onto a
-real unit-of-work (CRUD flushes, the route handler owns the single commit,
-`get_db()`'s `db_session()` wrapper rolls back automatically on any
-exception). That conversion was **not** rolled out further — as of this
-sprint, 18 of 25 files in `app/crud/` still call `db.commit()` directly
-inside individual functions. A multi-step operation across any of those 18
-(e.g. "create invoice, then reserve stock, then post GL" spanning
-`universal_invoices.py` + `universal_warehousing.py` + `crud_finance_core.py`)
-is **not** atomic — an exception partway through leaves whatever already
-committed permanently committed. This matters specifically for AI
-tool-calling because an agent chaining multiple tool calls into one logical
-action is exactly the multi-step-operation shape that breaks without a real
-UoW boundary.
+real unit-of-work. Sprint 5 (#1) finished the rollout: all 18 remaining
+`app/crud/*.py` files (and the service/endpoint layers calling them) had
+their internal `db.commit()` calls removed in favor of `db.flush()`, so the
+single commit/rollback boundary is now always `get_db()`'s `db_session()`
+wrapper — never an individual CRUD function. A small, deliberately-kept set
+of real commits remains for cases that genuinely need cross-connection
+visibility before something external happens (enqueuing a Celery task,
+claiming an idempotency key against concurrent requests) or must survive an
+exception about to be raised — each is commented in place; see
+`docs/production-hardening.md`.
 
-**If you're wiring an agent to call multiple write operations as one
-logical unit:** do not assume the existing CRUD functions are safe to
-chain and expect all-or-nothing behavior. Either wrap the whole sequence in
-your own explicit transaction the way Sprint 1 did for finance-core, or
-accept (and design the agent's error-recovery around) partial completion.
+**Practical effect for agent tool-calling:** a multi-step operation that
+opens exactly one `db_session()` (see `app/services/agent_adapters/` below)
+is now genuinely atomic — a failure partway through rolls back everything,
+including earlier steps that individually succeeded. `create_and_post_journal_voucher`
+in `finance_tools.py` is the concrete example: it used to be two separate,
+non-atomic CRUD calls an agent would have had to chain itself; it's now one
+tool call, one transaction.
+
+## Agent-safe adapter layer — NEW (Sprint 5 #2, audit #6)
+
+`app/services/agent_adapters/` is the direct answer to audit #6 ("Function
+signatures aren't agent-tool-ready — CRUD functions take `db: AsyncSession`
+as a parameter, which must never be exposed to an LLM tool schema").
+
+- `base.py` — the `@agent_tool` decorator. Inspects the wrapped function's
+  signature *at import time* and raises `AgentToolSignatureError`
+  immediately if any parameter is annotated `AsyncSession`/`AsyncConnection`
+  or named `db`/`session`/`db_session`/`connection`/`conn`. This is a
+  structural guarantee, not a naming convention — a mistake fails app
+  startup, not the first agent call that hits it.
+- `finance_tools.py`, `inventory_tools.py` — a curated set of adapters
+  (`get_account`, `create_account`, `create_and_post_journal_voucher`,
+  `get_item`, `create_item`, `execute_stock_movement`) over the existing
+  `app/crud` layer, matching the audit's own recommended fix order ("finance
+  + billing modules first, since these are the first agent tools planned").
+  Each opens its own `db_session()` internally and returns a plain Pydantic
+  schema (`from_attributes=True` config, validated while the session is
+  still open) — never an ORM object, which would be silently unsafe to
+  touch once its session closes.
+
+**What this deliberately does not do:** it does not touch the ~194 other
+`AsyncSession`-typed parameters across `app/crud/*.py`. Those functions are
+the normal internal application layer — every regular API endpoint depends
+on them sharing one request-scoped session for the atomicity Sprint 5 #1
+just fixed. Stripping `db` out of CRUD signatures generally (so each
+function opened its own session) would directly undo that fix: a
+multi-CRUD-call endpoint would go back to being non-atomic. The correct
+place to hide the session is at this adapter boundary — built specifically
+for whatever eventually calls it as a tool — not the internal layer that
+legitimately needs to share a transaction.
+
+**What's still not built:** a tool registry, JSON-schema generation from
+these adapters' signatures, or an orchestrator/agent loop (audit #3) — all
+explicitly separate, larger, not-yet-scoped work. This is the narrower
+precondition: a small set of functions that would actually be safe to
+register once that layer exists, plus the automated guard so any future
+addition to that set can't accidentally reintroduce a raw session
+parameter.
 
 ### Service-role Supabase client bypasses RLS
 
