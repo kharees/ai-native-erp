@@ -3,6 +3,11 @@ app/crud/inventory.py
 =====================
 Asynchronous CRUD repository layer for the AI-Native ERP Inventory module.
 
+NOT CANONICAL — see docs/inventory-architecture.md. Operates on the same
+`inventory_items` table as app/crud/crud_inventory.py (the Handloom Saree
+engine), with zero coordination between the two. See that doc before
+changing validation/business logic here.
+
 Responsibilities
 ----------------
   • All SQL is built with SQLAlchemy 2.0 ORM / Core expressions.

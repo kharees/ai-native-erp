@@ -3,6 +3,13 @@ app/api/v1/inventory.py
 ========================
 FastAPI router — Inventory Management micro-service endpoints.
 
+NOT CANONICAL — see docs/inventory-architecture.md. This router and
+app/api/v1/endpoints/inventory.py (the "Handloom Saree" engine) both read
+and write the same `inventory_items` table through two independent,
+uncoordinated CRUD modules. Universal Inventory (/api/v1/universal-inventory,
+app/api/v1/endpoints/universal_inventory.py) is the actively developed
+system of record — new inventory work belongs there, not here.
+
 Mount point (wired in app/api/v1/router.py → main.py):
     app.include_router(inventory_router,
                        prefix="/api/v1/inventory",

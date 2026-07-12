@@ -4,9 +4,16 @@ app/crud/crud_inventory.py
 Phase 4 — Asynchronous Repository & CRUD Operations Layer
          Multi-Tenant Handloom Saree Inventory Control Ledger
 
-This module provides the ``CRUDTenantInventory`` class — the single
-authoritative data-access gateway for all ``TenantSareeInventory``
-(``public.tenant_saree_inventory``) database operations.
+NOT CANONICAL — see docs/inventory-architecture.md. Despite the class
+docstring below, this is not the single authoritative gateway: it operates
+on the same `inventory_items` table as app/crud/inventory.py (the "general
+ERP inventory" module), with zero coordination between the two. (The table
+name reference below, `tenant_saree_inventory`, is also stale — the actual
+table is `inventory_items`; see app/models/inventory.py.)
+
+This module provides the ``CRUDTenantInventory`` class — a data-access
+gateway for ``TenantSareeInventory`` (an alias for ``InventoryItem``,
+table ``inventory_items``) database operations.
 
 Design Principles
 -----------------

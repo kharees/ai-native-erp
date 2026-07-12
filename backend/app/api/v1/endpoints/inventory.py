@@ -4,6 +4,14 @@ app/api/v1/endpoints/inventory.py
 Phase 3 — Multi-Tenant Asynchronous API Router Engine
        Handloom Inventory Control Ledger Pipelines
 
+NOT CANONICAL — see docs/inventory-architecture.md. This router and
+app/api/v1/inventory.py (the "general ERP inventory" module) both read and
+write the same `inventory_items` table through two independent,
+uncoordinated CRUD modules (this one via crud/crud_inventory.py). Universal
+Inventory (/api/v1/universal-inventory, app/api/v1/endpoints/universal_inventory.py)
+is the actively developed system of record — new inventory work belongs
+there, not here.
+
 This module wires the specialised saree / handloom inventory surface under
 the ``/api/v1/inventory`` prefix.  All three endpoints enforce strict
 tenancy isolation via the ``X-Tenant-ID`` request header and delegate
