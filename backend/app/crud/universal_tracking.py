@@ -1,7 +1,8 @@
 import uuid
 from datetime import date
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.pagination import paginate
 from app.models.universal_tracking import UniversalBatchMaster, UniversalSerialMaster, UniversalBatchStock
 from app.schemas.universal_tracking import UniversalBatchMasterCreate, UniversalSerialMasterCreate
 
@@ -30,13 +31,7 @@ async def list_batches(
     if batch_number: stmt = stmt.where(UniversalBatchMaster.batch_number.like(f"%{batch_number}%"))
     if status: stmt = stmt.where(UniversalBatchMaster.status == status)
         
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalBatchMaster.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    
-    return items, total
+    return await paginate(db, stmt, UniversalBatchMaster.created_at.desc(), limit, offset)
 
 async def get_near_expiry_batches(db: AsyncSession, tenant_id: uuid.UUID, cutoff_date: date):
     # Get active batches expiring before cutoff_date
@@ -70,10 +65,4 @@ async def list_serials(
     if serial_number: stmt = stmt.where(UniversalSerialMaster.serial_number.like(f"%{serial_number}%"))
     if status: stmt = stmt.where(UniversalSerialMaster.status == status)
         
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalSerialMaster.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    
-    return items, total
+    return await paginate(db, stmt, UniversalSerialMaster.created_at.desc(), limit, offset)

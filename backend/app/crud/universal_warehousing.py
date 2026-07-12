@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy import select, func, update, exc, and_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.pagination import paginate
 from app.models.universal_warehousing import (
     UniversalWarehouse,
     UniversalWarehouseZone,
@@ -40,12 +41,7 @@ async def list_warehouses(db: AsyncSession, tenant_id: uuid.UUID, limit: int, of
             (func.lower(UniversalWarehouse.code).like(search_pattern.lower()))
         )
     
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalWarehouse.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    return items, total
+    return await paginate(db, stmt, UniversalWarehouse.created_at.desc(), limit, offset)
 
 # -----------------
 # Bins
@@ -72,12 +68,7 @@ async def list_bins(db: AsyncSession, tenant_id: uuid.UUID, limit: int, offset: 
             (func.lower(UniversalWarehouseBin.code).like(search_pattern.lower()))
         )
     
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalWarehouseBin.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    return items, total
+    return await paginate(db, stmt, UniversalWarehouseBin.created_at.desc(), limit, offset)
 
 # -----------------
 # Stock Engine

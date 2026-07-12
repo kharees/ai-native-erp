@@ -1,6 +1,7 @@
 import uuid
-from sqlalchemy import select, func, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.pagination import paginate
 from app.models.universal_customers import (
     UniversalCustomerGroup, UniversalCustomerType, UniversalCustomerCategory, UniversalCustomer,
     UniversalCustomerContact, UniversalCustomerAddress
@@ -15,11 +16,8 @@ from app.schemas.universal_customers import (
 )
 
 async def get_paginated(db: AsyncSession, model, tenant_id: uuid.UUID, limit: int, offset: int):
-    count_stmt = select(func.count(model.id)).where(model.tenant_id == tenant_id)
-    total = (await db.execute(count_stmt)).scalar_one()
-    stmt = select(model).where(model.tenant_id == tenant_id).order_by(model.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    return items, total
+    stmt = select(model).where(model.tenant_id == tenant_id)
+    return await paginate(db, stmt, model.created_at.desc(), limit, offset)
 
 # Groups
 async def create_group(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalCustomerGroupCreate) -> UniversalCustomerGroup:
@@ -52,12 +50,7 @@ async def list_customers(db: AsyncSession, tenant_id: uuid.UUID, limit: int, off
     stmt = select(UniversalCustomer).where(UniversalCustomer.tenant_id == tenant_id)
     if search:
         stmt = stmt.where(UniversalCustomer.name.ilike(f"%{search}%"))
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-    
-    stmt = stmt.order_by(UniversalCustomer.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    return items, total
+    return await paginate(db, stmt, UniversalCustomer.created_at.desc(), limit, offset)
 
 async def get_customer(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> UniversalCustomer | None:
     return (await db.execute(select(UniversalCustomer).where(UniversalCustomer.id == id, UniversalCustomer.tenant_id == tenant_id))).scalar_one_or_none()

@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy import select, func, update, exc
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.pagination import paginate
 from app.models.universal_inventory import (
     UniversalCategory,
     UniversalBrand,
@@ -162,13 +163,7 @@ async def list_items(
             (func.lower(UniversalItemMaster.item_code).like(search_pattern.lower()))
         )
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalItemMaster.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    
-    return items, total
+    return await paginate(db, stmt, UniversalItemMaster.created_at.desc(), limit, offset)
 
 async def update_item(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID | None, id: uuid.UUID, payload: UniversalItemMasterUpdate) -> UniversalItemMaster | None:
     update_data = payload.model_dump(exclude_unset=True)

@@ -1,6 +1,7 @@
 import uuid
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.pagination import paginate
 from app.models.universal_ledger import UniversalInventoryLedger
 
 async def list_ledger_entries(
@@ -24,10 +25,4 @@ async def list_ledger_entries(
     if reference_type:
         stmt = stmt.where(UniversalInventoryLedger.reference_type == reference_type)
         
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    stmt = stmt.order_by(UniversalInventoryLedger.created_at.desc()).limit(limit).offset(offset)
-    items = (await db.execute(stmt)).scalars().all()
-    
-    return items, total
+    return await paginate(db, stmt, UniversalInventoryLedger.created_at.desc(), limit, offset)
