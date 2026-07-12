@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_
 
 from app.core.database import get_db
+from app.core.plans import get_plan_limits
 from app.models.users import UserProfile
 from app.models.auth import UserAccount
 from app.models.rbac import TenantUserRole
@@ -63,7 +64,27 @@ async def provision_user(
 ):
     """Provision a new user account and profile."""
     current_user_id = getattr(request.state, "user_id", None)
-    
+
+    # Enforce the tenant's plan seat limit — tenants.plan was read and
+    # logged by TenantAuthMiddleware (request.state.tenant_plan) but never
+    # actually checked against anything until now (audit #35).
+    tenant_plan = getattr(request.state, "tenant_plan", None)
+    limits = get_plan_limits(tenant_plan)
+    if limits.max_users is not None:
+        count_stmt = select(func.count()).select_from(UserProfile).where(
+            UserProfile.tenant_id == tenant_id,
+            UserProfile.deleted_at.is_(None),
+        )
+        current_user_count = (await db.execute(count_stmt)).scalar_one()
+        if current_user_count >= limits.max_users:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=(
+                    f"This tenant's '{tenant_plan or 'free'}' plan is limited to "
+                    f"{limits.max_users} users. Upgrade the plan to provision more."
+                ),
+            )
+
     # Check duplicate email
     email_stmt = select(UserAccount).where(UserAccount.email == user_in.email)
     existing_acc = (await db.execute(email_stmt)).scalar_one_or_none()
