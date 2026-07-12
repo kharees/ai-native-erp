@@ -17,7 +17,10 @@ async def create_payment_receipt(db: AsyncSession, tenant_id: uuid.UUID, payload
     
     # Update customer wallet if unallocated
     if obj.unallocated_amount > 0:
-        wallet = (await db.execute(select(UniversalCustomerWallet).where(UniversalCustomerWallet.customer_id == obj.customer_id))).scalar_one_or_none()
+        wallet = (await db.execute(select(UniversalCustomerWallet).where(
+            UniversalCustomerWallet.customer_id == obj.customer_id,
+            UniversalCustomerWallet.tenant_id == tenant_id,
+        ))).scalar_one_or_none()
         if not wallet:
             wallet = UniversalCustomerWallet(tenant_id=tenant_id, customer_id=obj.customer_id, balance=0.0)
             db.add(wallet)
@@ -43,11 +46,23 @@ async def create_payment_allocation(db: AsyncSession, tenant_id: uuid.UUID, payl
     obj = UniversalPaymentAllocation(tenant_id=tenant_id, **payload.model_dump())
     db.add(obj)
     
-    receipt = await db.get(UniversalPaymentReceipt, payload.receipt_id)
+    # db.get() looks up by primary key only — no tenant filter — so a
+    # receipt_id belonging to a different tenant used to be found and
+    # mutated here anyway (its unallocated_amount decremented, and that
+    # tenant's wallet balance drained, from an allocation the other tenant
+    # never made). Scoping this to tenant_id closes that.
+    receipt_stmt = select(UniversalPaymentReceipt).where(
+        UniversalPaymentReceipt.id == payload.receipt_id,
+        UniversalPaymentReceipt.tenant_id == tenant_id,
+    )
+    receipt = (await db.execute(receipt_stmt)).scalar_one_or_none()
     if receipt:
         receipt.unallocated_amount -= payload.allocated_amount
-        
-        wallet = (await db.execute(select(UniversalCustomerWallet).where(UniversalCustomerWallet.customer_id == receipt.customer_id))).scalar_one_or_none()
+
+        wallet = (await db.execute(select(UniversalCustomerWallet).where(
+            UniversalCustomerWallet.customer_id == receipt.customer_id,
+            UniversalCustomerWallet.tenant_id == tenant_id,
+        ))).scalar_one_or_none()
         if wallet:
             wallet.balance -= payload.allocated_amount
 

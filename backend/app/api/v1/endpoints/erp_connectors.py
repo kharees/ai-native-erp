@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.models.migration import ERPConnector, ERPImportLog, MigrationEntityType
 from app.schemas.erp_connectors import ERPConnectorCreate, ERPConnectorUpdate, ERPConnectorOut, ERPImportLogOut, ConnectorHealthCheckOut
@@ -14,21 +15,12 @@ from app.services.audit import AuditLogger
 
 router = APIRouter()
 
-def get_tenant_id(request: Request) -> uuid.UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    try:
-        return uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-
 @router.get("", response_model=List[ERPConnectorOut])
 async def list_connectors(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.tenant_id == tenant_id)
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -39,7 +31,7 @@ async def create_connector(
     payload: ERPConnectorCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     connector = ERPConnector(
         tenant_id=tenant_id,
         name=payload.name,
@@ -59,7 +51,7 @@ async def get_connector_endpoint(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     connector = (await db.execute(stmt)).scalar_one_or_none()
     if not connector:
@@ -73,7 +65,7 @@ async def update_connector(
     payload: ERPConnectorUpdate,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     connector = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -100,7 +92,7 @@ async def delete_connector(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     connector = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -117,7 +109,7 @@ async def test_connector(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     connector = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -139,7 +131,7 @@ async def sync_connector(
     entity_type: MigrationEntityType,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     connector = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -150,7 +142,7 @@ async def sync_connector(
         raise HTTPException(status_code=400, detail="Connector is not active")
         
     try:
-        session = await ERPConnectorEngine.sync_connector(db, connector.id, entity_type)
+        session = await ERPConnectorEngine.sync_connector(db, tenant_id, connector.id, entity_type)
         await AuditLogger.log_action(db=db, request=request, action_category="ERP_CONNECTOR", action_type="SYNC", resource_id=str(connector.id))
         return session
     except ValueError as e:
@@ -162,7 +154,7 @@ async def get_connector_logs(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     # Verify connector belongs to tenant
     stmt_conn = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
     if not (await db.execute(stmt_conn)).scalar_one_or_none():

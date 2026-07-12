@@ -5,6 +5,7 @@ from typing import List
 import uuid
 
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.models.migration import MigrationSession, MigrationRollbackLog, MigrationReconciliationReport
 from app.schemas.migration_execution import (
@@ -19,22 +20,13 @@ from app.services.audit import AuditLogger
 
 router = APIRouter()
 
-def get_tenant_id(request: Request) -> uuid.UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    try:
-        return uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-
 @router.get("/{session_id}/status", response_model=ExecutionStatusResponse)
 async def get_execution_status(
     request: Request,
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
     session = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -59,9 +51,9 @@ async def execute_migration(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        session = await MigrationExecutionManager.start_execution(db, session_id)
+        session = await MigrationExecutionManager.start_execution(db, tenant_id, session_id)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="START", resource_id=str(session_id))
         return session
     except ValueError as e:
@@ -73,9 +65,9 @@ async def pause_migration(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        session = await MigrationExecutionManager.pause_execution(db, session_id)
+        session = await MigrationExecutionManager.pause_execution(db, tenant_id, session_id)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="PAUSE", resource_id=str(session_id))
         return session
     except ValueError as e:
@@ -87,9 +79,9 @@ async def resume_migration(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        session = await MigrationExecutionManager.resume_execution(db, session_id)
+        session = await MigrationExecutionManager.resume_execution(db, tenant_id, session_id)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="RESUME", resource_id=str(session_id))
         return session
     except ValueError as e:
@@ -101,9 +93,9 @@ async def cancel_migration(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        session = await MigrationExecutionManager.cancel_execution(db, session_id)
+        session = await MigrationExecutionManager.cancel_execution(db, tenant_id, session_id)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="CANCEL", resource_id=str(session_id))
         return session
     except ValueError as e:
@@ -116,9 +108,9 @@ async def rollback_migration(
     payload: RollbackRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        log = await MigrationRollbackEngine.rollback_session(db, session_id, payload.partial, payload.record_ids)
+        log = await MigrationRollbackEngine.rollback_session(db, tenant_id, session_id, payload.partial, payload.record_ids)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="ROLLBACK", resource_id=str(session_id))
         return log
     except ValueError as e:
@@ -130,9 +122,9 @@ async def generate_reconciliation(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        report = await MigrationReconciliationEngine.generate_report(db, session_id)
+        report = await MigrationReconciliationEngine.generate_report(db, tenant_id, session_id)
         await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_EXECUTION", action_type="RECONCILE", resource_id=str(session_id))
         return report
     except ValueError as e:

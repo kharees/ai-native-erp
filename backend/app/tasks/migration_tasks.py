@@ -25,7 +25,7 @@ from app.models.migration import MigrationSession
 log = structlog.get_logger(__name__)
 
 
-async def _run_import(session_id: str) -> None:
+async def _run_import(session_id: str, tenant_id: str) -> None:
     from app.services.migration_engine import execute_import_chunked
 
     # Reads db_module.AsyncSessionLocal at call time, not import time — a
@@ -35,16 +35,25 @@ async def _run_import(session_id: str) -> None:
     # already bit middleware/tenant_auth.py before conftest.py added a
     # targeted second patch for it specifically; this avoids needing one).
     async with db_module.AsyncSessionLocal() as db:
-        stmt = select(MigrationSession).where(MigrationSession.id == uuid.UUID(session_id))
+        # Filtering by tenant_id here isn't closing a reachable exploit —
+        # this task is only ever enqueued server-side, after
+        # migration_engine.py::import_session already loaded and verified
+        # the session for the calling tenant (see #7 audit). It's cheap
+        # defense-in-depth against a poisoned/replayed queue message ever
+        # driving a worker to import into the wrong tenant's session.
+        stmt = select(MigrationSession).where(
+            MigrationSession.id == uuid.UUID(session_id),
+            MigrationSession.tenant_id == uuid.UUID(tenant_id),
+        )
         session = (await db.execute(stmt)).scalar_one_or_none()
         if session is None:
-            log.error("migration_import_task.session_not_found", session_id=session_id)
+            log.error("migration_import_task.session_not_found", session_id=session_id, tenant_id=tenant_id)
             return
         await execute_import_chunked(db, session)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30, name="migration.run_import")
-def run_migration_import(self, session_id: str) -> None:
+def run_migration_import(self, session_id: str, tenant_id: str) -> None:
     """
     Runs the full chunked import for `session_id` in a worker process.
 
@@ -57,7 +66,7 @@ def run_migration_import(self, session_id: str) -> None:
     """
     log.info("migration_import_task.started", session_id=session_id, attempt=self.request.retries + 1)
     try:
-        asyncio.run(_run_import(session_id))
+        asyncio.run(_run_import(session_id, tenant_id))
         log.info("migration_import_task.completed", session_id=session_id)
     except Exception as exc:
         log.error(

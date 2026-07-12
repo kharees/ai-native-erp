@@ -83,9 +83,17 @@ def get_connector(erp_type: str, credentials: Dict[str, Any]) -> ConnectorBase:
 
 class ERPConnectorEngine:
     @staticmethod
-    async def sync_connector(db: AsyncSession, connector_id: uuid.UUID, entity_type: MigrationEntityType) -> MigrationSession:
+    async def sync_connector(db: AsyncSession, tenant_id: uuid.UUID, connector_id: uuid.UUID, entity_type: MigrationEntityType) -> MigrationSession:
         """Triggers a manual sync from an ERP connector and creates a Migration Session."""
-        stmt = select(ERPConnector).where(ERPConnector.id == connector_id)
+        # The current (only) caller — POST /erp-connectors/{id}/sync — already
+        # verifies connector.tenant_id == tenant_id before reaching here, so
+        # this filter isn't closing an active exploit today. It's the
+        # defense-in-depth this function should have had regardless: nothing
+        # about this signature previously stopped a future caller (another
+        # endpoint, a background job, an agent tool) from syncing another
+        # tenant's connector — using their stored ERP credentials — on behalf
+        # of an unauthorized caller.
+        stmt = select(ERPConnector).where(ERPConnector.id == connector_id, ERPConnector.tenant_id == tenant_id)
         connector = (await db.execute(stmt)).scalar_one_or_none()
         
         if not connector:

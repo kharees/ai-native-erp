@@ -52,9 +52,9 @@ def _phone_format_issue_count(mapped_records: List[Dict[str, Any]]) -> int:
 class MigrationAICopilotService:
 
     @staticmethod
-    async def analyze_data_quality(db: AsyncSession, session_id: uuid.UUID) -> DataQualityReportOut:
+    async def analyze_data_quality(db: AsyncSession, tenant_id: uuid.UUID, session_id: uuid.UUID) -> DataQualityReportOut:
         """Analyzes data quality metrics for a session."""
-        stmt = select(MigrationSession).where(MigrationSession.id == session_id)
+        stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
         session = (await db.execute(stmt)).scalar_one_or_none()
 
         if not session:
@@ -131,9 +131,9 @@ class MigrationAICopilotService:
         )
 
     @staticmethod
-    async def suggest_cleansing_rules(db: AsyncSession, session_id: uuid.UUID) -> CleansingSuggestionsOut:
+    async def suggest_cleansing_rules(db: AsyncSession, tenant_id: uuid.UUID, session_id: uuid.UUID) -> CleansingSuggestionsOut:
         """Generates cleansing suggestions from real duplicate/format detection."""
-        stmt = select(MigrationSession).where(MigrationSession.id == session_id)
+        stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
         session = (await db.execute(stmt)).scalar_one_or_none()
 
         suggestions = []
@@ -164,13 +164,13 @@ class MigrationAICopilotService:
         return CleansingSuggestionsOut(suggestions=suggestions)
 
     @staticmethod
-    async def natural_language_query(db: AsyncSession, session_id: uuid.UUID, query: str) -> ChatResponseOut:
+    async def natural_language_query(db: AsyncSession, tenant_id: uuid.UUID, session_id: uuid.UUID, query: str) -> ChatResponseOut:
         """Rule-based Q&A over real session data. Not an LLM — see
         docs/ai-foundation.md for why this sprint didn't upgrade the whole
         chat engine (out of scope; only the specific hardcoded duplicate
         percentage named in audit #26 was in scope here)."""
         query_lower = query.lower()
-        stmt = select(MigrationSession).where(MigrationSession.id == session_id)
+        stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
         session = (await db.execute(stmt)).scalar_one_or_none()
 
         if not session:

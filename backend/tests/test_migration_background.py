@@ -42,9 +42,9 @@ async def test_large_session_enqueues_background_task(db_session: AsyncSession, 
     session = await _make_session(db_session, setup_tenant.id, IMPORT_ASYNC_THRESHOLD + 1)
 
     with patch("app.tasks.migration_tasks.run_migration_import.delay") as mock_delay:
-        result = await MigrationEngine.import_session(db_session, session.id)
+        result = await MigrationEngine.import_session(db_session, setup_tenant.id, session.id)
 
-    mock_delay.assert_called_once_with(str(session.id))
+    mock_delay.assert_called_once_with(str(session.id), str(setup_tenant.id))
     # Status is IMPORTING (enqueued, not yet processed) — the caller polls
     # GET /migration/execution/{id}/status for the real outcome.
     assert result.status == MigrationJobStatus.IMPORTING
@@ -54,7 +54,7 @@ async def test_small_session_does_not_enqueue_background_task(db_session: AsyncS
     session = await _make_session(db_session, setup_tenant.id, IMPORT_ASYNC_THRESHOLD)
 
     with patch("app.tasks.migration_tasks.run_migration_import.delay") as mock_delay:
-        result = await MigrationEngine.import_session(db_session, session.id)
+        result = await MigrationEngine.import_session(db_session, setup_tenant.id, session.id)
 
     mock_delay.assert_not_called()
     # No MigrationDataRecord rows were created for this synthetic session,

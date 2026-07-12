@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import uuid
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.models.migration import MigrationEntityType, MigrationDataRecord, MigrationSession
 from app.schemas.migration_hub import (
@@ -16,22 +17,13 @@ from app.services.audit import AuditLogger
 
 router = APIRouter()
 
-def get_tenant_id(request: Request) -> uuid.UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    try:
-        return uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-
 
 @router.get("/sessions", response_model=List[MigrationSessionOut])
 async def list_migration_sessions(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(MigrationSession).where(MigrationSession.tenant_id == tenant_id).order_by(MigrationSession.created_at.desc())
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -43,7 +35,7 @@ async def upload_migration_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     session = await MigrationEngine.initialize_session(db, tenant_id, entity_type, file)
     await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION", action_type="UPLOAD_FILE", resource_id=str(session.id))
     return session
@@ -53,15 +45,16 @@ async def validate_migration_session(
     session_id: uuid.UUID,
     payload: ValidateSessionPayload,
     db: AsyncSession = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(get_tenant_id)
+    tenant_id: uuid.UUID = Depends(get_verified_tenant_id)
 ):
     """
     Validates data mapping and applies transformations.
     """
     return await MigrationEngine.validate_session(
-        db, 
-        session_id, 
-        mapping_config=payload.mapping_config, 
+        db,
+        tenant_id,
+        session_id,
+        mapping_config=payload.mapping_config,
         transformation_rules=payload.transformation_rules
     )
 
@@ -69,7 +62,7 @@ async def validate_migration_session(
 async def ai_suggest_mapping(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(get_tenant_id)
+    tenant_id: uuid.UUID = Depends(get_verified_tenant_id)
 ):
     """
     Returns AI-suggested field mappings for uploaded raw data.
@@ -98,13 +91,22 @@ async def ai_suggest_mapping(
 async def analyze_cleansing_rules(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(get_tenant_id)
+    tenant_id: uuid.UUID = Depends(get_verified_tenant_id)
 ):
     """
     Analyzes mapped data for duplicates and returns duplicate clusters.
     """
     from app.services.data_cleansing import DataCleansingEngine
-    
+
+    # session_id alone was previously enough to read another tenant's
+    # imported row contents here — this ownership check was missing while
+    # every sibling endpoint in this file (preview, import) already had it.
+    owns_stmt = select(MigrationSession.id).where(
+        MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id
+    )
+    if not (await db.execute(owns_stmt)).scalar_one_or_none():
+        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+
     stmt = select(MigrationDataRecord).where(MigrationDataRecord.session_id == session_id)
     result = await db.execute(stmt)
     records = result.scalars().all()
@@ -129,7 +131,7 @@ async def preview_migration_session(
     only_invalid: bool = False,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     
     stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
     session = (await db.execute(stmt)).scalar_one_or_none()
@@ -159,11 +161,11 @@ async def run_import_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
     if not (await db.execute(stmt)).scalar_one_or_none():
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
         
-    session = await MigrationEngine.import_session(db, session_id)
+    session = await MigrationEngine.import_session(db, tenant_id, session_id)
     await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION", action_type="IMPORT_DATA", resource_id=str(session.id))
     return session

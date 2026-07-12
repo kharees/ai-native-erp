@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.services.audit import AuditLogger
 from app.services.finance_reports import finance_reports_service
@@ -20,12 +21,6 @@ from app.schemas.finance_reports import (
 log = structlog.get_logger(__name__)
 router = APIRouter()
 
-def get_tenant_id(request: Request) -> UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Missing tenant context")
-    return tenant_id
-
 @router.get("/trial-balance", response_model=TrialBalanceReport, dependencies=[Depends(RequirePermission("Finance", "Reports", "Read"))])
 async def get_trial_balance(
     request: Request,
@@ -33,7 +28,7 @@ async def get_trial_balance(
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE_REPORTING", action_type="GENERATE_TRIAL_BALANCE")
     return await finance_reports_service.generate_trial_balance(db, tenant_id, start_date, end_date)
 
@@ -44,7 +39,7 @@ async def get_profit_and_loss(
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE_REPORTING", action_type="GENERATE_PROFIT_AND_LOSS")
     return await finance_reports_service.generate_profit_and_loss(db, tenant_id, start_date, end_date)
 
@@ -54,7 +49,7 @@ async def get_balance_sheet(
     as_of_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     if not as_of_date:
         as_of_date = date.today()
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE_REPORTING", action_type="GENERATE_BALANCE_SHEET")
@@ -67,7 +62,7 @@ async def get_cash_flow(
     end_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE_REPORTING", action_type="GENERATE_CASH_FLOW")
     return await finance_reports_service.generate_cash_flow(db, tenant_id, start_date, end_date)
 
@@ -77,7 +72,7 @@ async def get_dashboard_summary(
     as_of_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     if not as_of_date:
         as_of_date = date.today()
     await AuditLogger.log_action(db=db, request=request, action_category="FINANCE_REPORTING", action_type="GENERATE_DASHBOARD_SUMMARY")

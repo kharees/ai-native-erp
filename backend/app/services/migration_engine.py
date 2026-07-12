@@ -191,12 +191,12 @@ class MigrationEngine:
         return session
 
     @staticmethod
-    async def validate_session(db: AsyncSession, session_id: uuid.UUID, mapping_config: Optional[Dict[str, str]] = None, transformation_rules: Optional[List[Dict[str, Any]]] = None) -> MigrationSession:
+    async def validate_session(db: AsyncSession, tenant_id: uuid.UUID, session_id: uuid.UUID, mapping_config: Optional[Dict[str, str]] = None, transformation_rules: Optional[List[Dict[str, Any]]] = None) -> MigrationSession:
         from app.services.data_cleansing import DataCleansingEngine
         from app.services.migration_ai import MigrationAIAssistant
         from app.models.migration import MigrationValidationLog
 
-        stmt = select(MigrationSession).where(MigrationSession.id == session_id)
+        stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
         result = await db.execute(stmt)
         session = result.scalar_one_or_none()
         
@@ -287,8 +287,8 @@ class MigrationEngine:
         return session
 
     @staticmethod
-    async def import_session(db: AsyncSession, session_id: uuid.UUID) -> MigrationSession:
-        stmt = select(MigrationSession).where(MigrationSession.id == session_id)
+    async def import_session(db: AsyncSession, tenant_id: uuid.UUID, session_id: uuid.UUID) -> MigrationSession:
+        stmt = select(MigrationSession).where(MigrationSession.id == session_id, MigrationSession.tenant_id == tenant_id)
         result = await db.execute(stmt)
         session = result.scalar_one_or_none()
 
@@ -313,7 +313,7 @@ class MigrationEngine:
             # GET /migration/execution/{id}/status for progress instead of
             # holding one HTTP request open for the whole import.
             from app.tasks.migration_tasks import run_migration_import
-            run_migration_import.delay(str(session.id))
+            run_migration_import.delay(str(session.id), str(session.tenant_id))
             return session
 
         return await execute_import_chunked(db, session)

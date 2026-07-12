@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.schemas.migration_ai_copilot import (
     DataQualityReportOut, ErrorAnalysisRequest, ErrorAnalysisOut,
@@ -13,24 +14,15 @@ from app.services.audit import AuditLogger
 
 router = APIRouter()
 
-def get_tenant_id(request: Request) -> uuid.UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    try:
-        return uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-
 @router.get("/{session_id}/data-quality", response_model=DataQualityReportOut, dependencies=[Depends(RequirePermission("Migration", "System", "Read"))])
 async def get_data_quality(
     request: Request,
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        return await MigrationAICopilotService.analyze_data_quality(db, session_id)
+        return await MigrationAICopilotService.analyze_data_quality(db, tenant_id, session_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -50,9 +42,9 @@ async def get_cleansing_suggestions(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     try:
-        return await MigrationAICopilotService.suggest_cleansing_rules(db, session_id)
+        return await MigrationAICopilotService.suggest_cleansing_rules(db, tenant_id, session_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -63,6 +55,6 @@ async def ai_chat(
     payload: ChatRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     await AuditLogger.log_action(db=db, request=request, action_category="MIGRATION_AI", action_type="CHAT_QUERY", resource_id=str(session_id))
-    return await MigrationAICopilotService.natural_language_query(db, session_id, payload.query)
+    return await MigrationAICopilotService.natural_language_query(db, tenant_id, session_id, payload.query)

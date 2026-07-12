@@ -8,6 +8,7 @@ import structlog
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.middleware.tenant_auth import get_verified_tenant_id
 from app.middleware.rbac import RequirePermission
 from app.services.audit import AuditLogger
 from app.crud.crud_finance_core import finance_core
@@ -20,15 +21,6 @@ from app.schemas.finance_core import (
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
-
-def get_tenant_id(request: Request) -> UUID:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing tenant context. Ensure request passes through TenantAuthMiddleware.",
-        )
-    return tenant_id
 
 def get_user_id(request: Request) -> UUID:
     # Assuming user_id is in request.state from auth middleware
@@ -44,7 +36,7 @@ async def create_account_group(
     payload: AccountGroupCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     if payload.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_core.create_account_group(db, payload)
@@ -62,12 +54,12 @@ async def list_account_groups(
     limit: int = 100,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     return await finance_core.get_account_groups(db, tenant_id=tenant_id, skip=skip, limit=limit)
 
 @router.get("/account-groups/{id}", response_model=AccountGroupOut, dependencies=[Depends(RequirePermission("Finance", "AccountGroup", "Read"))])
 async def get_account_group(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     obj = await finance_core.get_account_group(db, id, tenant_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"Account group '{id}' not found.")
@@ -75,7 +67,7 @@ async def get_account_group(request: Request, id: UUID, db: AsyncSession = Depen
 
 @router.patch("/account-groups/{id}", response_model=AccountGroupOut, dependencies=[Depends(RequirePermission("Finance", "AccountGroup", "Update"))])
 async def update_account_group(request: Request, id: UUID, payload: AccountGroupUpdate, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     obj = await finance_core.get_account_group(db, id, tenant_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"Account group '{id}' not found.")
@@ -95,7 +87,7 @@ async def create_account(
     payload: AccountCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     if payload.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
     result = await finance_core.create_account(db, payload)
@@ -113,12 +105,12 @@ async def list_accounts(
     limit: int = 100,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     return await finance_core.get_accounts(db, tenant_id=tenant_id, skip=skip, limit=limit)
 
 @router.get("/accounts/{id}", response_model=AccountOut, dependencies=[Depends(RequirePermission("Finance", "Account", "Read"))])
 async def get_account(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     obj = await finance_core.get_account(db, id, tenant_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"Account '{id}' not found.")
@@ -126,7 +118,7 @@ async def get_account(request: Request, id: UUID, db: AsyncSession = Depends(get
 
 @router.patch("/accounts/{id}", response_model=AccountOut, dependencies=[Depends(RequirePermission("Finance", "Account", "Update"))])
 async def update_account(request: Request, id: UUID, payload: AccountUpdate, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     obj = await finance_core.get_account(db, id, tenant_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"Account '{id}' not found.")
@@ -146,7 +138,7 @@ async def create_journal_voucher(
     payload: JournalVoucherCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     user_id = get_user_id(request)
     if payload.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Tenant ID mismatch")
@@ -165,12 +157,12 @@ async def list_journal_vouchers(
     limit: int = 100,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     return await finance_core.get_journal_vouchers(db, tenant_id=tenant_id, skip=skip, limit=limit)
 
 @router.get("/journals/{id}", response_model=JournalVoucherOut, dependencies=[Depends(RequirePermission("Finance", "Journal", "Read"))])
 async def get_journal_voucher(request: Request, id: UUID, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     obj = await finance_core.get_journal_voucher(db, id, tenant_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"Journal voucher '{id}' not found.")
@@ -182,7 +174,7 @@ async def approve_journal_voucher(
     voucher_id: UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    tenant_id = get_tenant_id(request)
+    tenant_id = await get_verified_tenant_id(request)
     user_id = get_user_id(request)
 
     # JournalVoucher.approved_by is a FK to user_profiles.id, not
