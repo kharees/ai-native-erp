@@ -1,4 +1,4 @@
-# Tenant isolation audit (Sprint 5 #3)
+# Tenant isolation audit (Sprint 5 #3, #4)
 
 Full audit method: enumerated every SQLAlchemy model with a `tenant_id`
 column (100 classes across 32 files), then statically scanned every
@@ -7,6 +7,34 @@ column (100 classes across 32 files), then statically scanned every
 `tenant_id` filter in the same statement. 18 candidates came out of that
 scan; each was manually traced to its caller(s) to determine whether it
 was live-exploitable or already protected upstream. Findings below.
+
+## Sprint 5 #4 — 4 gaps found by post-#3 verification, now closed
+
+A dedicated verification pass after #3 extended the scan to also check
+`db.get()` calls (a primary-key-only lookup that #3's `select`/`update`/
+`delete` scan never covered) and found 4 more real gaps, all in
+`app/crud/`:
+
+| File | Function | Severity | Fix |
+|---|---|---|---|
+| `universal_banks.py` | `create_bank_voucher` | CRITICAL | `db.get(UniversalBankAccount, ...)` → tenant-scoped `select()`, moved before the write. Any tenant could previously credit/debit another tenant's real bank balance. |
+| `universal_ai_billing.py` | `calculate_credit_risk` | HIGH | `db.get(UniversalCustomer, ...)` → tenant-scoped `select()`. Any tenant could previously read another tenant's customer credit data. |
+| `universal_collections.py` | `get_collection_status` | MEDIUM | Same fix. Any tenant could previously read another tenant's customer collections data. |
+| `universal_invoices.py` | `create_tax_invoice` | LOW-MEDIUM | Added an explicit `customer_id` ownership check (raises 404) before creating the invoice — this one had no `db.get()` to replace, just no check at all. |
+
+All 4 covered by new tests in `tests/test_tenant_isolation.py`; each was
+confirmed to fail against the pre-fix code before being verified green.
+Re-running the full scan (including the `db.get()` check) after these
+fixes found zero remaining `db.get()` calls against any tenant model, and
+the same 4 previously-reviewed `select()` sites as before (see "Confirmed
+still correct" below) — no new gaps introduced.
+
+One unrelated, pre-existing bug was discovered while testing the
+collections fix: `get_collection_status` references
+`customer.company_name`, but `UniversalCustomer`'s actual field is `name`
+— this 500s on *any* successful (same-tenant) call, unrelated to tenant
+scoping. Out of scope for this fix ("do not refactor unrelated code");
+not fixed, flagged here for a follow-up.
 
 ## Real cross-tenant vulnerabilities fixed
 

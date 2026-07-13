@@ -29,6 +29,7 @@ import uuid
 import pandas as pd
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.asyncio
@@ -239,3 +240,137 @@ async def test_payment_allocation_does_not_mutate_foreign_tenant_receipt(
     )
     receipt_after = check.scalar_one()
     assert float(receipt_after.unallocated_amount) == float(original_unallocated)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 5 (#4): fixes for the 4 gaps found by the post-#3 verification pass
+# that #3's static scan missed — all four used db.get() (a primary-key-only
+# lookup) instead of a tenant-scoped select(), which #3's scan (select/
+# update/delete only) didn't check for.
+# ---------------------------------------------------------------------------
+
+async def test_bank_voucher_does_not_mutate_foreign_tenant_balance(
+    async_client: AsyncClient, db_session: AsyncSession, auth_headers, alt_tenant_headers, setup_tenant
+):
+    account_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/banks/accounts",
+        headers=auth_headers,
+        json={
+            "bank_name": "Isolation Bank",
+            "account_number": f"ISO-{uuid.uuid4().hex[:10]}",
+            "ifsc_code": "ISOL0000001",
+            "current_balance": 1000.0,
+        },
+    )
+    assert account_resp.status_code == 201, account_resp.text
+    bank_account_id = account_resp.json()["id"]
+
+    # alt_tenant_headers' tenant creates a RECEIPT voucher against tenant
+    # A's bank account. Before the fix, crud.create_bank_voucher used
+    # db.get() (primary-key-only, no tenant filter) and would silently
+    # credit tenant A's real balance from a voucher tenant A never made.
+    voucher_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/banks/vouchers",
+        headers=alt_tenant_headers,
+        json={
+            "bank_account_id": bank_account_id,
+            "voucher_number": f"ISO-V-{uuid.uuid4().hex[:8]}",
+            "voucher_type": "RECEIPT",
+            "amount": 500.0,
+        },
+    )
+    # The voucher record itself is still created (pre-existing business
+    # logic: a voucher with no matching-and-owned bank account is a silent
+    # no-op on the balance side, not an error — unchanged by this fix).
+    assert voucher_resp.status_code == 201, voucher_resp.text
+
+    from app.models.universal_banks import UniversalBankAccount
+
+    check = await db_session.execute(
+        select(UniversalBankAccount).where(UniversalBankAccount.id == bank_account_id)
+    )
+    account_after = check.scalar_one()
+    assert float(account_after.current_balance) == 1000.0
+
+
+async def test_credit_risk_score_rejects_foreign_tenant_customer(
+    async_client: AsyncClient, auth_headers, alt_tenant_headers
+):
+    customer_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/customers/",
+        headers=auth_headers,
+        json={"name": "Isolation Credit Customer", "email": "credit-isolation@example.com"},
+    )
+    assert customer_resp.status_code == 201, customer_resp.text
+    customer_id = customer_resp.json()["id"]
+
+    # Before the fix, crud.calculate_credit_risk used db.get() (no tenant
+    # filter) and would disclose tenant A's customer's credit_limit/name
+    # to tenant B.
+    foreign_resp = await async_client.get(
+        f"/api/v1/omnichannel-billing/ai/risk-score/{customer_id}", headers=alt_tenant_headers
+    )
+    assert foreign_resp.status_code == 404
+
+    owner_resp = await async_client.get(
+        f"/api/v1/omnichannel-billing/ai/risk-score/{customer_id}", headers=auth_headers
+    )
+    assert owner_resp.status_code == 200
+
+
+async def test_collection_status_rejects_foreign_tenant_customer(
+    async_client: AsyncClient, auth_headers, alt_tenant_headers
+):
+    customer_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/customers/",
+        headers=auth_headers,
+        json={"name": "Isolation Collections Customer", "email": "collections-isolation@example.com"},
+    )
+    assert customer_resp.status_code == 201, customer_resp.text
+    customer_id = customer_resp.json()["id"]
+
+    # Before the fix, crud.get_collection_status used db.get() (no tenant
+    # filter) and would disclose tenant A's customer's outstanding/credit
+    # data to tenant B.
+    foreign_resp = await async_client.get(
+        f"/api/v1/omnichannel-billing/collections/status/{customer_id}", headers=alt_tenant_headers
+    )
+    assert foreign_resp.status_code == 404
+
+    # Not asserting the owner's own request succeeds here: discovered
+    # while writing this test that crud.get_collection_status has a
+    # pre-existing, unrelated bug (references customer.company_name, but
+    # the model's field is `name`) that 500s on ANY successful lookup,
+    # same-tenant or not. Out of scope for a tenant-isolation fix ("do not
+    # refactor unrelated code") — not fixed here, flagged for follow-up.
+    # The property this test exists to prove — a foreign tenant is
+    # rejected before reaching that broken line at all — already holds.
+
+
+async def test_tax_invoice_rejects_foreign_tenant_customer(
+    async_client: AsyncClient, auth_headers, alt_tenant_headers
+):
+    customer_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/customers/",
+        headers=auth_headers,
+        json={"name": "Isolation Invoice Customer", "email": "invoice-isolation@example.com"},
+    )
+    assert customer_resp.status_code == 201, customer_resp.text
+    customer_id = customer_resp.json()["id"]
+
+    # Before the fix, crud.create_tax_invoice had no ownership check on
+    # customer_id at all; tenant B could create an invoice referencing
+    # tenant A's customer.
+    foreign_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/invoices/tax",
+        headers=alt_tenant_headers,
+        json={"customer_id": customer_id, "invoice_number": f"ISO-TAX-{uuid.uuid4().hex[:8]}", "items": []},
+    )
+    assert foreign_resp.status_code == 404
+
+    owner_resp = await async_client.post(
+        "/api/v1/omnichannel-billing/invoices/tax",
+        headers=auth_headers,
+        json={"customer_id": customer_id, "invoice_number": f"ISO-TAX-{uuid.uuid4().hex[:8]}", "items": []},
+    )
+    assert owner_resp.status_code == 201, owner_resp.text

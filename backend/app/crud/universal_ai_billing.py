@@ -9,7 +9,14 @@ from app.schemas.universal_ai_billing import (
 )
 
 async def calculate_credit_risk(db: AsyncSession, tenant_id: uuid.UUID, customer_id: uuid.UUID) -> AICreditRiskScoreResponse:
-    customer = await db.get(UniversalCustomer, customer_id)
+    # db.get() is a primary-key-only lookup with no tenant filter — a
+    # customer_id belonging to another tenant would previously be found and
+    # its credit_limit/name disclosed here (Sprint 5 #3 verification
+    # finding, HIGH). Scoping this to tenant_id closes that.
+    customer_stmt = select(UniversalCustomer).where(
+        UniversalCustomer.id == customer_id, UniversalCustomer.tenant_id == tenant_id
+    )
+    customer = (await db.execute(customer_stmt)).scalar_one_or_none()
     if not customer:
         return None
     

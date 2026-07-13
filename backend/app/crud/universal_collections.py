@@ -5,7 +5,14 @@ from app.models.universal_customers import UniversalCustomer
 from app.models.universal_invoices import UniversalTaxInvoice
 
 async def get_collection_status(db: AsyncSession, tenant_id: uuid.UUID, customer_id: uuid.UUID) -> dict:
-    customer = await db.get(UniversalCustomer, customer_id)
+    # db.get() is a primary-key-only lookup with no tenant filter — a
+    # customer_id belonging to another tenant would previously be found and
+    # its name/credit data disclosed here (Sprint 5 #3 verification
+    # finding, MEDIUM). Scoping this to tenant_id closes that.
+    customer_stmt = select(UniversalCustomer).where(
+        UniversalCustomer.id == customer_id, UniversalCustomer.tenant_id == tenant_id
+    )
+    customer = (await db.execute(customer_stmt)).scalar_one_or_none()
     if not customer: return None
     
     # Simple virtual logic for outstanding
