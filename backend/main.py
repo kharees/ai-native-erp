@@ -32,9 +32,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.database import check_db_health, close_db, init_db
+from app.core.rate_limit import limiter
 
 # ---------------------------------------------------------------------------
 # Structured logging
@@ -153,6 +156,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
 
 # ===========================================================================
 # Middleware Stack
@@ -241,6 +247,19 @@ async def finance_core_error_handler(request: Request, exc: FinanceCoreError) ->
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "request_id": request_id},
+    )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """5 login attempts per IP per 15 minutes (see auth.py::login) — brute-force protection."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": "Too many login attempts. Please try again in 15 minutes.",
+            "request_id": request_id,
+        },
     )
 
 

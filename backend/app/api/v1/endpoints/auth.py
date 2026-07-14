@@ -9,11 +9,13 @@ import uuid
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models.auth import UserAccount
 from app.models.users import UserProfile
 from app.models.sessions import TenantSession
 from app.core.security import (
     verify_password,
+    get_password_hash,
     create_access_token,
     create_refresh_token,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -45,6 +47,14 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=_REFRESH_COOKIE_NAME, path=_REFRESH_COOKIE_PATH)
 
 
+# Precomputed once at import time so an unknown-email login still pays the
+# same bcrypt.checkpw() cost as a known-email login with the wrong
+# password — otherwise "unknown email" returns fast (no bcrypt call) and
+# "known email, wrong password" returns slow, letting an attacker
+# enumerate valid emails purely from response timing.
+_DUMMY_PASSWORD_HASH = get_password_hash("timing-parity-dummy-password")
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -63,6 +73,7 @@ class TokenResponse(BaseModel):
     user: dict
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/15minutes")
 async def login(
     request: Request,
     response: Response,
@@ -97,6 +108,10 @@ async def login(
     user_account = result.scalar_one_or_none()
 
     if not user_account:
+        # Same bcrypt comparison cost as the "found" path below, even
+        # though this is guaranteed to fail — closes the timing
+        # side-channel (audit #4) without changing the response.
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     # 2. Verify Password
