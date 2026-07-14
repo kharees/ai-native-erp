@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.universal_banks import UniversalBankAccount, UniversalBankVoucher
@@ -36,10 +37,17 @@ async def create_bank_voucher(db: AsyncSession, tenant_id: uuid.UUID, payload: U
 
     # Update bank balance
     if bank:
+        # bank.current_balance is a Numeric column (Decimal) once
+        # DB-fetched, as it always is here; payload.amount is a plain
+        # Pydantic float. Decimal +=/-= float raises TypeError
+        # unconditionally on every voucher against an existing account.
+        # Casting both sides through Decimal(str(...)) before combining
+        # is correct regardless of either operand's current type — same
+        # defensive pattern as crud.universal_payments.create_payment_receipt.
         if payload.voucher_type == "RECEIPT":
-            bank.current_balance += payload.amount
+            bank.current_balance = Decimal(str(bank.current_balance)) + Decimal(str(payload.amount))
         elif payload.voucher_type == "PAYMENT":
-            bank.current_balance -= payload.amount
+            bank.current_balance = Decimal(str(bank.current_balance)) - Decimal(str(payload.amount))
             
     await db.flush()
     await db.refresh(obj)

@@ -26,12 +26,14 @@ async def create_payment_receipt(db: AsyncSession, tenant_id: uuid.UUID, payload
             db.add(wallet)
             await db.flush()
         # wallet.balance is a Numeric column (Decimal) once fetched fresh
-        # from the DB (as opposed to a just-constructed Python object where
-        # it's still the raw float passed to the constructor above); mixing
-        # Decimal += float raises TypeError. Only ever surfaced for a
-        # customer's second+ receipt, since the first always hits the
-        # freshly-constructed-object path instead.
-        wallet.balance += Decimal(str(obj.unallocated_amount))
+        # from the DB, but still a raw float on a just-constructed object
+        # (the 0.0 passed to the constructor above) until it's flushed and
+        # refreshed. Wrapping the current value in Decimal(str(...)) before
+        # adding makes this correct either way, instead of relying on
+        # wallet.balance already being a Decimal (previously true only for
+        # a customer's second+ receipt, since the first always hit the
+        # freshly-constructed-object path and raised TypeError on +=).
+        wallet.balance = Decimal(str(wallet.balance)) + Decimal(str(obj.unallocated_amount))
 
     await db.flush()
     await db.refresh(obj)
@@ -57,14 +59,20 @@ async def create_payment_allocation(db: AsyncSession, tenant_id: uuid.UUID, payl
     )
     receipt = (await db.execute(receipt_stmt)).scalar_one_or_none()
     if receipt:
-        receipt.unallocated_amount -= payload.allocated_amount
+        # receipt.unallocated_amount is a Numeric column (Decimal), always
+        # DB-fetched here; payload.allocated_amount is a plain Pydantic
+        # float. Decimal -= float raises TypeError unconditionally.
+        # Casting both sides through Decimal(str(...)) is correct
+        # regardless of either operand's current type — same defensive
+        # pattern as create_payment_receipt above.
+        receipt.unallocated_amount = Decimal(str(receipt.unallocated_amount)) - Decimal(str(payload.allocated_amount))
 
         wallet = (await db.execute(select(UniversalCustomerWallet).where(
             UniversalCustomerWallet.customer_id == receipt.customer_id,
             UniversalCustomerWallet.tenant_id == tenant_id,
         ))).scalar_one_or_none()
         if wallet:
-            wallet.balance -= payload.allocated_amount
+            wallet.balance = Decimal(str(wallet.balance)) - Decimal(str(payload.allocated_amount))
 
     await db.flush()
     await db.refresh(obj)

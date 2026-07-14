@@ -71,6 +71,72 @@ would not fix this. Worth prioritizing over #13 if forced to pick one —
 a swallowed/misdelivered error response on unhandled exceptions is a
 correctness gap on every route, not just the auth path.
 
+## GST/tax calculation is absent system-wide, not just in the agent layer
+
+**Priority: higher than the two items below it, and separate from them.**
+This is a whole-system compliance gap discovered while scoping
+`app/agent/tools/billing_tools.py`'s `create_invoice` tool — it is not an
+agent-layer problem and fixing the agent layer does not fix it.
+
+`crud.universal_invoices.create_tax_invoice` is a pure pass-through: every
+tax figure (`cgst_amount`/`sgst_amount`/`igst_amount` per line item,
+`total_cgst`/`total_sgst`/`total_igst`/`tds_amount` on the invoice) is
+persisted exactly as submitted, with zero calculation, zero validation
+that line-item tax sums reconcile with invoice totals, and zero lookup
+against `UniversalTaxConfiguration`/`UniversalHSNSAC`
+(`app/crud/universal_taxes.py`) — real tables holding tenant-configured
+tax rates and HSN/SAC codes that **nothing in the codebase ever queries**.
+A human calling `POST /omnichannel-billing/invoices/tax` directly today
+must pre-compute every tax number by hand; the API provides no safety net.
+
+**Consequence for the agent tool:** `create_invoice`'s input schema
+deliberately excludes all seven tax-amount fields for v1 (see the comment
+above `create_invoice` in `billing_tools.py`) — the tool can only create
+non-tax / zero-tax invoices until this is fixed. This is a narrower, safer
+symptom of the underlying gap, not a fix for it: the gap exists for every
+other caller (the UI, direct API access, any future tool) regardless of
+what this one tool's schema allows.
+
+**Real fix, tracked as its own backlog item, not bundled into any agent
+work:** a tax-calculation service that resolves the correct rate from
+`UniversalTaxConfiguration`/`UniversalHSNSAC` given each line item's HSN/SAC
+code and the tenant's jurisdiction, computes CGST+SGST (intra-state) vs
+IGST (inter-state) correctly, and is called from `create_tax_invoice`
+(and any other invoice-creation path) rather than trusting caller-supplied
+numbers. That's real, dedicated compliance work — not something to fold
+into an unrelated task's scope.
+
+## Agent billing tools — no idempotency protection yet (money-mutating)
+
+**Priority: must be fixed before the orchestrator goes live** — this is
+not a "someday" item like most of this doc; it blocks connecting an LLM
+to real money-moving operations.
+
+`app/agent/tools/billing_tools.py`'s `create_invoice` and `record_payment`
+handlers wrap `crud.universal_invoices.create_tax_invoice` and
+`crud.universal_payments.create_payment_receipt` directly, with no
+idempotency-key claim/check around them — unlike their HTTP-endpoint
+counterparts (`app/api/v1/endpoints/universal_invoices.py`,
+`universal_payments.py`), which both wrap the same CRUD calls in
+`claim_idempotency_key`/`complete_idempotency_key`
+(`app/services/idempotency.py`).
+
+This was a deliberate scoping decision, not an oversight: generating or
+supplying the idempotency key is properly an *orchestrator* concern (e.g.
+derived deterministically from a conversation turn ID so a retried tool
+call after an ambiguous failure doesn't double-create), and no
+orchestrator exists yet (audit #3 — still true as of this entry). Each
+handler has an inline `# TODO` marking this explicitly.
+
+**The concrete risk:** an LLM agent retrying a tool call it believes
+failed (timeout, ambiguous error, its own confusion about whether the
+call completed) can create a duplicate invoice or double-record a
+payment, with no protection at all today. Before wiring any orchestrator
+to these two handlers specifically, thread the same
+`claim_idempotency_key`/`complete_idempotency_key` pattern through them,
+with the orchestrator supplying a real, stable key per logical tool
+invocation.
+
 ## Docker / docker-compose / CI — unverified against live infrastructure
 
 `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`, and
