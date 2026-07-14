@@ -32,6 +32,45 @@ attempt without dedicated time to re-verify every one of the ~100 backend
 tests plus live-testing every auth/session/RBAC edge case again, given how
 much of Sprints 1-4 went into getting that path correct in the first place.
 
+## #13b — request_logging_middleware also has the BaseHTTPMiddleware exception-propagation gap
+
+**Priority: higher than #13 — fix this one first.** #13 masks a header on
+an already-produced auth error response (annoying, but the 401 itself
+still reaches the client). #13b can prevent the client from receiving
+*any* usable error response at all when a route raises unexpectedly —
+that's every route, not just auth, and it's the difference between a
+client seeing a clean error and seeing nothing/a connection failure.
+
+**Newly found** (while writing `tests/test_universal_intelligence.py`'s
+"AI provider unconfigured" test): `main.py`'s `request_logging_middleware`
+(registered via `@app.middleware("http")`, which Starlette implements as
+`BaseHTTPMiddleware` under the hood — same mechanism as #13's
+`TenantAuthMiddleware`) has a *different* symptom of the same root cause.
+An unhandled exception raised inside a route (e.g.
+`AIProviderNotConfiguredError` propagating out of
+`universal_intelligence.py` when no AI provider is configured) does reach
+`main.py`'s `global_exception_handler` — confirmed via its log line
+actually firing — but the resulting `JSONResponse` cannot pass back
+through this middleware, so instead of a clean 500 response reaching the
+client, the raw exception propagates further up the ASGI stack. Under
+httpx's `ASGITransport` (i.e. every test in this suite) that means it
+surfaces as a raised Python exception at the test-client call site
+instead of an HTTP response; the equivalent behavior in an actual
+deployed server (uvicorn, not the test transport) would need separate
+verification, since production-server exception handling doesn't
+necessarily fail the same way.
+
+**Not fixed here** — found and worked around inside one test
+(`test_ai_dashboard_raises_instead_of_fabricating_when_ai_unconfigured`
+asserts via `pytest.raises` instead of a status code), not fixed at the
+source, since the real fix is the same pure-ASGI rewrite #13 already
+scoped out as too large to attempt without dedicated time. Distinct
+backlog item from #13 though: different middleware, different symptom
+(response-delivery failure vs. missing headers), so fixing #13 alone
+would not fix this. Worth prioritizing over #13 if forced to pick one —
+a swallowed/misdelivered error response on unhandled exceptions is a
+correctness gap on every route, not just the auth path.
+
 ## Docker / docker-compose / CI — unverified against live infrastructure
 
 `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`, and
