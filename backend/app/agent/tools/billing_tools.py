@@ -6,13 +6,34 @@ over the existing Billing module (app/crud/universal_invoices.py,
 universal_payments.py, universal_customers.py). See app/agent/tools/__init__.py
 for the package-level contract.
 
-CRITICAL: tenant_id and user_id are never part of any tool's input_schema
+CRITICAL: tenant_id, user_id, and idempotency_key are never part of any
+tool's input_schema
 --------------------------------------------------------------------------
-Every handler below takes tenant_id (and, where relevant, user_id) as a
-real Python parameter — but neither is ever listed in that tool's
-input_schema. They must be injected by the calling code from the
-authenticated request/session context, never supplied by the model. See
-the package docstring for why this is a hard rule, not a preference.
+Every handler below takes tenant_id (and, where relevant, user_id and
+idempotency_key) as a real Python parameter — but none of these are ever
+listed in that tool's input_schema. They must be injected by the calling
+code, never supplied by the model. tenant_id/user_id come from the
+authenticated request/session context; idempotency_key is generated
+deterministically by the orchestrator (e.g. from a stable
+conversation_id:turn_id:tool_call_id) so a retried call after an
+ambiguous failure reuses the same key. An LLM given control over its own
+idempotency key could trivially defeat the whole mechanism by varying it
+on every retry. See the package docstring for why this is a hard rule,
+not a preference.
+
+Idempotency (create_invoice, record_payment)
+---------------------------------------------
+Both money-mutating handlers require a real idempotency_key and reuse
+app/services/idempotency.py's claim_idempotency_key/complete_idempotency_key
+unmodified -- the same mechanism already protecting the equivalent HTTP
+endpoints (app/api/v1/endpoints/universal_invoices.py,
+universal_payments.py), just called inline instead of split across an
+endpoint function and a CRUD call. Each uses its own endpoint identifier
+("agent.create_invoice", "agent.record_payment") distinct from the HTTP
+endpoints' own ("invoices.tax", "payments.receipts") -- an agent-issued
+key and a human-issued key happening to match are two independent claims,
+not a collision. search_customer is read-only and has no idempotency
+concern.
 
 Unit-of-work
 ------------
@@ -38,6 +59,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from fastapi import HTTPException
+
 from app.core.database import db_session
 from app.crud import universal_customers as crud_customers
 from app.crud import universal_invoices as crud_invoices
@@ -52,6 +75,7 @@ from app.schemas.universal_payments import (
     UniversalPaymentReceiptCreate,
     UniversalPaymentReceiptResponse,
 )
+from app.services.idempotency import claim_idempotency_key, complete_idempotency_key
 from app.services.agent_adapters.base import agent_tool
 
 
@@ -127,6 +151,7 @@ _CREATE_INVOICE_SCHEMA: dict[str, Any] = {
 async def handle_create_invoice(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
+    idempotency_key: str,
     customer_id: uuid.UUID,
     invoice_number: str,
     items: list[dict[str, Any]],
@@ -135,18 +160,6 @@ async def handle_create_invoice(
     subtotal: float = 0.0,
     total_amount: float = 0.0,
 ) -> dict[str, Any]:
-    # TODO(orchestrator, money-mutating): no idempotency-key protection.
-    # A retried tool call after an ambiguous failure can double-create an
-    # invoice. The HTTP endpoint for this same CRUD call
-    # (app/api/v1/endpoints/universal_invoices.py::create_tax_invoice)
-    # wraps it in claim_idempotency_key/complete_idempotency_key
-    # (app/services/idempotency.py); this handler does not, because
-    # generating a stable key is the orchestrator's job (it has the
-    # conversation/turn context to derive one from), and no orchestrator
-    # exists yet. MUST be added before this handler is wired to a live
-    # agent loop -- see docs/production-hardening.md, "Agent billing
-    # tools — no idempotency protection yet (money-mutating)".
-    #
     # user_id is accepted (and required) for future audit-trail
     # attribution even though crud.create_tax_invoice does not currently
     # take or store it -- neither does its HTTP endpoint counterpart.
@@ -157,6 +170,15 @@ async def handle_create_invoice(
     del user_id
 
     async with db_session() as db:
+        claim = await claim_idempotency_key(db, tenant_id, "agent.create_invoice", idempotency_key)
+        if claim.replay_response is not None:
+            return claim.replay_response
+        if claim.conflict:
+            raise HTTPException(
+                status_code=409,
+                detail="A create_invoice call with this idempotency key is already in progress.",
+            )
+
         payload = UniversalTaxInvoiceCreate(
             customer_id=customer_id,
             invoice_number=invoice_number,
@@ -167,7 +189,12 @@ async def handle_create_invoice(
             items=[UniversalTaxInvoiceItemCreate(**item) for item in items],
         )
         obj = await crud_invoices.create_tax_invoice(db, tenant_id, payload)
-        return UniversalTaxInvoiceResponse.model_validate(obj).model_dump(mode="json")
+        response_body = UniversalTaxInvoiceResponse.model_validate(obj).model_dump(mode="json")
+
+        if claim.should_complete:
+            await complete_idempotency_key(db, tenant_id, "agent.create_invoice", idempotency_key, obj.id, response_body)
+
+        return response_body
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +228,7 @@ _RECORD_PAYMENT_SCHEMA: dict[str, Any] = {
 async def handle_record_payment(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
+    idempotency_key: str,
     customer_id: uuid.UUID,
     receipt_number: str,
     payment_mode: str,
@@ -209,19 +237,20 @@ async def handle_record_payment(
     bank_account_id: uuid.UUID | None = None,
     reference_number: str | None = None,
 ) -> dict[str, Any]:
-    # TODO(orchestrator, money-mutating): same idempotency gap as
-    # handle_create_invoice above -- see that function's TODO and
-    # docs/production-hardening.md for the full explanation. A retried
-    # call here can double-record a payment and double-credit a
-    # customer's wallet (crud.create_payment_receipt credits
-    # UniversalCustomerWallet when unallocated_amount > 0). MUST be
-    # fixed before this handler is wired to a live agent loop.
-    #
     # user_id: same future-audit-attribution note as
     # handle_create_invoice -- not currently stored or used.
     del user_id
 
     async with db_session() as db:
+        claim = await claim_idempotency_key(db, tenant_id, "agent.record_payment", idempotency_key)
+        if claim.replay_response is not None:
+            return claim.replay_response
+        if claim.conflict:
+            raise HTTPException(
+                status_code=409,
+                detail="A record_payment call with this idempotency key is already in progress.",
+            )
+
         payload = UniversalPaymentReceiptCreate(
             customer_id=customer_id,
             bank_account_id=bank_account_id,
@@ -232,7 +261,12 @@ async def handle_record_payment(
             unallocated_amount=unallocated_amount,
         )
         obj = await crud_payments.create_payment_receipt(db, tenant_id, payload)
-        return UniversalPaymentReceiptResponse.model_validate(obj).model_dump(mode="json")
+        response_body = UniversalPaymentReceiptResponse.model_validate(obj).model_dump(mode="json")
+
+        if claim.should_complete:
+            await complete_idempotency_key(db, tenant_id, "agent.record_payment", idempotency_key, obj.id, response_body)
+
+        return response_body
 
 
 # ---------------------------------------------------------------------------

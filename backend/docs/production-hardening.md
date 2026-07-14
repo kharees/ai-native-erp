@@ -106,36 +106,68 @@ IGST (inter-state) correctly, and is called from `create_tax_invoice`
 numbers. That's real, dedicated compliance work — not something to fold
 into an unrelated task's scope.
 
-## Agent billing tools — no idempotency protection yet (money-mutating)
+## RESOLVED — Agent billing tools now require an idempotency key
 
-**Priority: must be fixed before the orchestrator goes live** — this is
-not a "someday" item like most of this doc; it blocks connecting an LLM
-to real money-moving operations.
+Previously read "no idempotency protection yet (money-mutating)" — fixed
+as the first task of the orchestrator step, before any orchestrator loop
+was written. `app/agent/tools/billing_tools.py`'s `create_invoice` and
+`record_payment` handlers now take a required `idempotency_key: str`
+parameter (no default — cannot be called without one) and wrap their CRUD
+calls in `claim_idempotency_key`/`complete_idempotency_key`
+(`app/services/idempotency.py`), the same mechanism already protecting
+the equivalent HTTP endpoints, under distinct endpoint identifiers
+(`"agent.create_invoice"`, `"agent.record_payment"`) so an agent-issued
+key and a human-issued key can never collide. A retried call with the
+same key now returns the original result instead of re-executing.
+`idempotency_key` is orchestrator-generated, never part of either tool's
+`input_schema` — see the file's module docstring for why, alongside the
+same rule for `tenant_id`/`user_id`.
 
-`app/agent/tools/billing_tools.py`'s `create_invoice` and `record_payment`
-handlers wrap `crud.universal_invoices.create_tax_invoice` and
-`crud.universal_payments.create_payment_receipt` directly, with no
-idempotency-key claim/check around them — unlike their HTTP-endpoint
-counterparts (`app/api/v1/endpoints/universal_invoices.py`,
-`universal_payments.py`), which both wrap the same CRUD calls in
-`claim_idempotency_key`/`complete_idempotency_key`
-(`app/services/idempotency.py`).
+Verified by `tests/test_billing_tools.py::test_record_payment_duplicate_idempotency_key_does_not_double_create`
+(and the `create_invoice` equivalent) — two independent handler
+invocations with the same key, second call asserted to return the exact
+same resource id and create no second DB row.
 
-This was a deliberate scoping decision, not an oversight: generating or
-supplying the idempotency key is properly an *orchestrator* concern (e.g.
-derived deterministically from a conversation turn ID so a retried tool
-call after an ambiguous failure doesn't double-create), and no
-orchestrator exists yet (audit #3 — still true as of this entry). Each
-handler has an inline `# TODO` marking this explicitly.
+## Orchestrator retry logic MUST account for: a rejected agent action permanently poisons its idempotency key
 
-**The concrete risk:** an LLM agent retrying a tool call it believes
-failed (timeout, ambiguous error, its own confusion about whether the
-call completed) can create a duplicate invoice or double-record a
-payment, with no protection at all today. Before wiring any orchestrator
-to these two handlers specifically, thread the same
-`claim_idempotency_key`/`complete_idempotency_key` pattern through them,
-with the orchestrator supplying a real, stable key per logical tool
-invocation.
+**Priority: design-time, not "someday."** This isn't a "fix it eventually"
+item — it's a real behavior the orchestrator's retry logic needs to know
+about and design around from the start, before it's written, not
+discovered after a live agent gets stuck in a loop it can't escape.
+
+**The behavior:** if `create_invoice`/`record_payment`'s wrapped CRUD call
+raises *after* `claim_idempotency_key` has already committed the claim
+row but *before* `complete_idempotency_key` ever runs — e.g.
+`create_tax_invoice`'s customer-ownership check returning a 404 for a bad
+`customer_id` — the claim is left stuck in `status="pending"`
+**permanently**. Nothing ever marks it failed or expires it. Confirmed
+empirically (not theoretical): reject once with a bad input, retry with
+the *same* key after correcting the input, and the retry gets a 409
+("already in progress") forever, never a fresh attempt.
+
+**Why this matters specifically for the orchestrator's design:** the
+natural failure-recovery instinct — "the tool call failed, let the agent
+see the error and retry with corrected arguments, same idempotency key
+since it's logically the same action" — **does not work** here and will
+look like the tool is permanently broken for that conversation turn. The
+orchestrator's retry logic must either (a) mint a *new* idempotency key
+for any retry that follows a non-transient failure (a validation
+rejection, not a network/timeout ambiguity — the two need to be
+distinguished), or (b) treat a 409 response from these two tools as
+possibly meaning "a prior attempt with this key failed and is stuck," not
+only "a concurrent call is genuinely in flight," and handle it
+accordingly rather than looping forever on the same key.
+
+**Not new, not introduced by the agent tool work:** the HTTP endpoints
+(`create_tax_invoice`, `create_payment_receipt`) have had identical
+exposure since idempotency was first added; this is inherited, not
+created, by `billing_tools.py`. Real underlying fix would be
+`claim_idempotency_key` (or its caller) marking the claim `status="failed"`
+on an exception instead of leaving it `"pending"`, so a corrected retry
+with the same key can proceed cleanly — that's a change to shared
+infrastructure (`app/services/idempotency.py`) used beyond just these two
+agent tools, not scoped to this task. The orchestrator-design point above
+stands regardless of when that underlying fix lands.
 
 ## Docker / docker-compose / CI — unverified against live infrastructure
 
