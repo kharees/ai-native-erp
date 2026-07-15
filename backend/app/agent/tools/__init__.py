@@ -27,6 +27,7 @@ tool here that lets a model supply either of these fields is a
 regression of that work, not a new feature.
 """
 
-from app.agent.tools.billing_tools import BILLING_TOOLS, ToolDefinition
+from app.agent.tools.base import ToolDefinition
+from app.agent.tools.billing_tools import BILLING_TOOLS
 
 __all__ = ["BILLING_TOOLS", "ToolDefinition"]

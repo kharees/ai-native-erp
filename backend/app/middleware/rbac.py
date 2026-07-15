@@ -53,6 +53,88 @@ def _clear_permission_cache() -> None:
     _permission_cache.clear()
 
 
+async def check_permission(
+    db: AsyncSession,
+    tenant_id: UUID,
+    user_id: UUID,
+    module: str,
+    feature: str,
+    action: str,
+) -> bool:
+    """
+    The actual RBAC check, independent of any HTTP Request. Extracted out
+    of RequirePermission.__call__ (which now delegates to this) so a
+    non-HTTP caller — the agent orchestrator (app/agent/orchestrator/),
+    which has tenant_id/user_id directly from its own authenticated
+    caller but no Request to pull them from — can enforce the exact same
+    RBAC rules instead of reimplementing this query: one enforcement
+    point rather than two parallel ones (same principle as @agent_tool).
+
+    Returns True/False; does not raise. RequirePermission is the layer
+    that turns a False into an HTTPException for the HTTP path — the
+    orchestrator wants a plain bool so it can classify a denial as a
+    tool-outcome and feed it back to the model, not crash the loop.
+    """
+    admin_cache_key = ("admin", tenant_id, user_id)
+    is_admin = _cache_get(admin_cache_key)
+    if is_admin is None:
+        # 1. Check for admin bypass — an immutable flag (TenantRole.is_admin_bypass),
+        # not the role name. Keying this off name string ("Super Admin",
+        # "Organization Admin") meant renaming either role silently broke
+        # admin access, and any tenant admin with RBAC:Roles:Create could
+        # self-escalate by creating a custom role with the same name — the
+        # bypass check never looked at anything else. is_admin_bypass isn't
+        # exposed by TenantRoleCreate/TenantRoleUpdate (see app/schemas/rbac.py),
+        # so it can't be set via the public API.
+        from app.models.users import UserProfile
+        admin_stmt = (
+            select(TenantRole.id, UserProfile.user_id, TenantUserRole.tenant_id)
+            .join(TenantUserRole, TenantUserRole.role_id == TenantRole.id)
+            .join(UserProfile, UserProfile.id == TenantUserRole.user_id)
+            .where(
+                UserProfile.user_id == user_id,
+                TenantUserRole.tenant_id == tenant_id,
+                TenantRole.is_admin_bypass.is_(True),
+            )
+            .limit(1)
+        )
+        admin_result = await db.execute(admin_stmt)
+        is_admin = admin_result.first() is not None
+        _cache_set(admin_cache_key, is_admin)
+
+    if is_admin:
+        return True
+
+    perm_cache_key = ("perm", tenant_id, user_id, module, feature, action)
+    allowed = _cache_get(perm_cache_key)
+    if allowed is None:
+        from app.models.users import UserProfile
+        # 2. Build query to check if user has the permission through any assigned role
+        stmt = (
+            select(TenantUserRole)
+            .join(UserProfile, UserProfile.id == TenantUserRole.user_id)
+            .join(TenantRole, TenantRole.id == TenantUserRole.role_id)
+            .join(TenantRolePermission, TenantRolePermission.role_id == TenantRole.id)
+            .join(TenantPermission, TenantPermission.id == TenantRolePermission.permission_id)
+            .where(
+                UserProfile.user_id == user_id,
+                TenantUserRole.tenant_id == tenant_id,
+                TenantPermission.module == module,
+                TenantPermission.feature == feature,
+                TenantPermission.action == action,
+            )
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        allowed = result.scalar_one_or_none() is not None
+        _cache_set(perm_cache_key, allowed)
+
+    # Optional: In a full enterprise system, we would also check assignment.branch_id
+    # against a requested branch_id parameter to ensure scoped access.
+
+    return allowed
+
+
 class RequirePermission:
     """
     Dependency class to enforce RBAC permissions on endpoints.
@@ -84,67 +166,11 @@ class RequirePermission:
                 detail="User or tenant context missing"
             )
 
-        admin_cache_key = ("admin", tenant_id, user_id)
-        is_admin = _cache_get(admin_cache_key)
-        if is_admin is None:
-            # 1. Check for admin bypass — an immutable flag (TenantRole.is_admin_bypass),
-            # not the role name. Keying this off name string ("Super Admin",
-            # "Organization Admin") meant renaming either role silently broke
-            # admin access, and any tenant admin with RBAC:Roles:Create could
-            # self-escalate by creating a custom role with the same name — the
-            # bypass check never looked at anything else. is_admin_bypass isn't
-            # exposed by TenantRoleCreate/TenantRoleUpdate (see app/schemas/rbac.py),
-            # so it can't be set via the public API.
-            from app.models.users import UserProfile
-            admin_stmt = (
-                select(TenantRole.id, UserProfile.user_id, TenantUserRole.tenant_id)
-                .join(TenantUserRole, TenantUserRole.role_id == TenantRole.id)
-                .join(UserProfile, UserProfile.id == TenantUserRole.user_id)
-                .where(
-                    UserProfile.user_id == user_id,
-                    TenantUserRole.tenant_id == tenant_id,
-                    TenantRole.is_admin_bypass.is_(True),
-                )
-                .limit(1)
-            )
-            admin_result = await db.execute(admin_stmt)
-            is_admin = admin_result.first() is not None
-            _cache_set(admin_cache_key, is_admin)
-
-        if is_admin:
-            return True
-
-        perm_cache_key = ("perm", tenant_id, user_id, self.module, self.feature, self.action)
-        allowed = _cache_get(perm_cache_key)
-        if allowed is None:
-            from app.models.users import UserProfile
-            # 2. Build query to check if user has the permission through any assigned role
-            stmt = (
-                select(TenantUserRole)
-                .join(UserProfile, UserProfile.id == TenantUserRole.user_id)
-                .join(TenantRole, TenantRole.id == TenantUserRole.role_id)
-                .join(TenantRolePermission, TenantRolePermission.role_id == TenantRole.id)
-                .join(TenantPermission, TenantPermission.id == TenantRolePermission.permission_id)
-                .where(
-                    UserProfile.user_id == user_id,
-                    TenantUserRole.tenant_id == tenant_id,
-                    TenantPermission.module == self.module,
-                    TenantPermission.feature == self.feature,
-                    TenantPermission.action == self.action,
-                )
-                .limit(1)
-            )
-            result = await db.execute(stmt)
-            allowed = result.scalar_one_or_none() is not None
-            _cache_set(perm_cache_key, allowed)
-
+        allowed = await check_permission(db, tenant_id, user_id, self.module, self.feature, self.action)
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required permission: {self.action} on {self.module}.{self.feature}"
             )
-
-        # Optional: In a full enterprise system, we would also check assignment.branch_id
-        # against a requested branch_id parameter to ensure scoped access.
 
         return True

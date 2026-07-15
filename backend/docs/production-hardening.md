@@ -128,12 +128,40 @@ Verified by `tests/test_billing_tools.py::test_record_payment_duplicate_idempote
 invocations with the same key, second call asserted to return the exact
 same resource id and create no second DB row.
 
-## Orchestrator retry logic MUST account for: a rejected agent action permanently poisons its idempotency key
+## RESOLVED (in the orchestrator's own logic) — a rejected agent action permanently poisons its idempotency key
 
-**Priority: design-time, not "someday."** This isn't a "fix it eventually"
-item — it's a real behavior the orchestrator's retry logic needs to know
-about and design around from the start, before it's written, not
-discovered after a live agent gets stuck in a loop it can't escape.
+`app/agent/orchestrator/loop.py` now handles this explicitly, per the
+design principle below, which is still accurate and worth keeping as
+context for why the loop is built the way it is:
+
+- A 409 from a tool dispatch is classified as `ToolOutcome.STUCK_CONFLICT`
+  and fed back to the model with an explicit "do not retry automatically,
+  tell the user to check manually" message (`_STUCK_DETAIL` in loop.py) —
+  never silently retried.
+- That specific `tool_call_id` is added to a per-invocation `stuck_call_ids`
+  set; any further request for that *exact* call_id within the same
+  `run_turn`/`resume_after_confirmation` chain is refused locally (no
+  second dispatch attempt at all) rather than hitting the database again.
+  Deliberately scoped to the call_id, not the tool name — a stuck
+  `create_invoice` call must not block a different, unrelated invoice the
+  user asks for later in the same conversation.
+- Verified against a **real** stuck claim (not simulated): a rejected
+  `create_invoice` call is retried with the literal same `pending_tool_call`
+  via two sequential `resume_after_confirmation` calls, reproducing a
+  genuine 409 from `app/services/idempotency.py`, in
+  `tests/test_orchestrator.py::test_stuck_conflict_classified_via_real_idempotency_race`.
+  The call-id-scoped local-refusal logic is verified separately in
+  `test_stuck_call_id_not_retried_within_same_batch` against a synthetic
+  always-409 test tool, since `create_invoice`/`record_payment`'s own
+  confirmation gate always intercepts before a same-batch duplicate could
+  ever reach that logic — a real constraint discovered while writing
+  these tests, not a hypothetical one.
+
+**The underlying `app/services/idempotency.py` behavior itself is
+unchanged** — a rejected claim still gets stuck at the *storage* layer.
+What changed is that the orchestrator now handles that reality correctly
+instead of looping on it or presenting a confusing error. Original
+context below, for why this was designed the way it is:
 
 **The behavior:** if `create_invoice`/`record_payment`'s wrapped CRUD call
 raises *after* `claim_idempotency_key` has already committed the claim

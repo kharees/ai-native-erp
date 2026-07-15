@@ -15,6 +15,16 @@ not an LLM call, since duplicate detection doesn't need one and forcing an
 LLM in just to exercise this abstraction would be scope creep into
 "Document AI" territory this sprint explicitly excludes.
 
+complete_with_tools() (added for the Billing orchestrator, see
+app/agent/orchestrator/) is native tool-calling, not prompted-JSON --
+each provider maps ToolDefinition-shaped tools onto its own SDK's actual
+tools= parameter and parses its own native tool-call response format.
+Deliberately not built on top of complete()'s plain-text interface: both
+providers are specifically trained for structured tool-calling through
+this path, and prompted-JSON extraction is measurably less reliable for
+a tool like create_invoice with a nested items array -- not a risk worth
+taking for tools that create invoices and record payments.
+
 Design choices
 --------------
 * Async only — every call site in this codebase is an async FastAPI route
@@ -31,12 +41,57 @@ Design choices
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TypedDict
+from dataclasses import dataclass, field
+from typing import Any, TypedDict
 
 
-class AIMessage(TypedDict):
-    role: str  # "user" | "assistant"
-    content: str
+class AIToolCall(TypedDict):
+    """One tool invocation the model requested. `arguments` is already a
+    parsed dict -- OpenAI returns its arguments as a JSON string on the
+    wire; providers are responsible for parsing that before this type is
+    ever constructed, so callers never handle provider-specific encoding."""
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+class AIMessage(TypedDict, total=False):
+    """
+    One conversation turn. `total=False` so this single type can represent
+    all three roles a tool-calling conversation needs without a Union:
+
+    - Plain text turn (the only shape used before complete_with_tools
+      existed, and the only shape complete() ever needs):
+        {"role": "user" | "assistant", "content": "..."}
+    - An assistant turn that invoked one or more tools (must be replayed
+      back to the provider verbatim on the next turn -- both providers
+      require their own prior tool-call turn in the message history to
+      make sense of the tool-result turns that follow it):
+        {"role": "assistant", "content": "optional preamble text" | None,
+         "tool_calls": [AIToolCall, ...]}
+    - A tool-result turn answering one specific prior tool call by id:
+        {"role": "tool_result", "tool_call_id": "...", "content": "..."}
+
+    role/content stay required-in-practice for the plain-text case
+    (existing callers always set both); tool_calls and tool_call_id are
+    the only genuinely optional keys, present on exactly one of the two
+    new turn shapes above.
+    """
+    role: str
+    content: str | None
+    tool_calls: list[AIToolCall]
+    tool_call_id: str
+
+
+@dataclass
+class AIToolCallResult:
+    """Result of a complete_with_tools() call. Exactly one of `text` /
+    `tool_calls` is meaningful in practice: a provider returns tool_calls
+    when it decided to act, or text when it produced a final answer --
+    never both empty (that raises AIProviderError, same no-silent-fallback
+    contract as complete())."""
+    text: str | None
+    tool_calls: list[AIToolCall] = field(default_factory=list)
 
 
 class AIProviderError(Exception):
@@ -82,5 +137,44 @@ class AIProvider(ABC):
         ------
         AIProviderError
             On any failure — network, auth, rate limit, malformed response.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def complete_with_tools(
+        self,
+        messages: list[AIMessage],
+        tools: list[dict[str, Any]],
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+    ) -> AIToolCallResult:
+        """
+        Send a chat-style completion request with tools the model may
+        invoke, and return either its final text or the tool call(s) it
+        wants to make.
+
+        Parameters
+        ----------
+        messages:
+            Conversation turns — see AIMessage. May include prior
+            assistant tool-call turns and tool-result turns from earlier
+            iterations of an orchestrator loop, not just plain text.
+        tools:
+            `[{"name": str, "description": str, "input_schema": dict}, ...]`
+            — the same shape as app.agent.tools.billing_tools.ToolDefinition's
+            name/description/input_schema fields, so callers pass tool
+            definitions through with no reshaping. Each provider maps this
+            onto its own SDK's native tools= parameter internally.
+        system, max_tokens, temperature:
+            Same as complete().
+
+        Raises
+        ------
+        AIProviderError
+            On any failure — network, auth, rate limit, or a response with
+            neither text nor tool_calls (a provider returning genuinely
+            nothing is treated as a failure, not an empty success).
         """
         raise NotImplementedError

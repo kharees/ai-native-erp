@@ -56,11 +56,11 @@ codebase, not two parallel ones.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from fastapi import HTTPException
 
+from app.agent.tools.base import ToolDefinition
 from app.core.database import db_session
 from app.crud import universal_customers as crud_customers
 from app.crud import universal_invoices as crud_invoices
@@ -77,22 +77,6 @@ from app.schemas.universal_payments import (
 )
 from app.services.idempotency import claim_idempotency_key, complete_idempotency_key
 from app.services.agent_adapters.base import agent_tool
-
-
-@dataclass(frozen=True)
-class ToolDefinition:
-    """One registry entry: everything a future orchestrator needs to
-    describe this tool to an LLM, enforce authorization before calling
-    it, and dispatch the call. required_permission is (module, feature,
-    action) — the same three strings already passed to RequirePermission
-    in the corresponding HTTP endpoint; the orchestrator is responsible
-    for checking it (not enforced by the handler itself — these handlers
-    have no request/RBAC context to check against)."""
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-    required_permission: tuple[str, str, str]
-    handler: Callable[..., Awaitable[dict[str, Any]]]
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +295,7 @@ BILLING_TOOLS: list[ToolDefinition] = [
         input_schema=_CREATE_INVOICE_SCHEMA,
         required_permission=("UniversalBilling", "Invoices", "Create"),
         handler=handle_create_invoice,
+        requires_confirmation=True,
     ),
     ToolDefinition(
         name="record_payment",
@@ -322,6 +307,7 @@ BILLING_TOOLS: list[ToolDefinition] = [
         input_schema=_RECORD_PAYMENT_SCHEMA,
         required_permission=("UniversalBilling", "Payments", "Create"),
         handler=handle_record_payment,
+        requires_confirmation=True,
     ),
     ToolDefinition(
         name="search_customer",
