@@ -109,7 +109,34 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture
 async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db():
-        yield db_session
+        # This override reuses ONE session for the whole test (deliberate --
+        # the outer rollback-based test-isolation transaction below depends
+        # on it). Unlike the real app.core.database.get_db() (fresh session
+        # per request, rolled back on exception -- see its docstring), a
+        # request here that raises mid-handler (e.g. a deliberate 4xx/409
+        # domain-validation test) can leave pending, unflushed ORM attribute
+        # mutations sitting on an already-loaded object in the shared
+        # session. The next request's autoflush then sends that stale,
+        # abandoned mutation to Postgres -- observed concretely: a
+        # rejected negative-stock update flushing into a later, unrelated
+        # ledger GET and 500ing it.
+        #
+        # expire_all() on exception (not begin_nested()/rollback(), and not
+        # in a try/finally around the whole yield -- only after a failure)
+        # discards exactly that in-memory staleness -- forces already-
+        # loaded objects to re-read from the DB on next access -- without
+        # touching the outer transaction's boundary at all. begin_nested()
+        # was tried first and reverted: it interacts badly with Starlette's
+        # BaseHTTPMiddleware, which runs the downstream route in a separate
+        # anyio task from the middleware that also touches this same mocked
+        # session, and a SAVEPOINT's stricter transaction-state tracking
+        # turned that pre-existing multi-task sharing into a hard error for
+        # at least one route (migration upload) that didn't fail before.
+        try:
+            yield db_session
+        except BaseException:
+            db_session.expire_all()
+            raise
         
     app.dependency_overrides[get_db] = override_get_db
     
@@ -171,7 +198,16 @@ def mock_jwt():
 async def setup_tenant(db_session: AsyncSession):
     tenant = Tenant(name="Test Tenant", slug="test", plan="enterprise")
     db_session.add(tenant)
-    await db_session.commit()
+    # flush, not commit -- this session is bound to the outer connection-
+    # level transaction the db_session fixture opens for whole-test
+    # isolation (rolled back at teardown). A commit() here ends that
+    # transaction early, which async_client's per-request begin_nested()
+    # savepoint then has nothing valid left to nest into ("Can't operate
+    # on closed transaction"). flush() makes the row visible to later
+    # queries on this same session without ending the transaction --
+    # same convention every other test fixture/helper in this codebase
+    # uses (see e.g. tests/test_orchestrator.py's _make_tenant_and_user).
+    await db_session.flush()
     await db_session.refresh(tenant)
     return tenant
 
@@ -194,8 +230,8 @@ async def auth_headers(setup_tenant, db_session: AsyncSession):
         is_active=True
     )
     db_session.add_all([account, profile])
-    await db_session.commit()
-    
+    await db_session.flush()
+
     token = create_mock_token(
         tenant_id=str(setup_tenant.id),
         user_id=str(user_id),
@@ -243,7 +279,7 @@ async def auth_headers(setup_tenant, db_session: AsyncSession):
 async def alt_tenant_headers(db_session: AsyncSession):
     alt_tenant = Tenant(name="Alt Tenant", slug="alt", plan="enterprise")
     db_session.add(alt_tenant)
-    await db_session.commit()
+    await db_session.flush()
     await db_session.refresh(alt_tenant)
     
     user_id = uuid.uuid4()
@@ -260,8 +296,8 @@ async def alt_tenant_headers(db_session: AsyncSession):
         is_active=True
     )
     db_session.add_all([account, profile])
-    await db_session.commit()
-    
+    await db_session.flush()
+
     token = create_mock_token(
         tenant_id=str(alt_tenant.id),
         user_id=str(user_id),

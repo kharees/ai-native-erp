@@ -11,7 +11,16 @@ class UniversalWarehouse(Base):
     branch_id = mapped_column(UUID(as_uuid=True), ForeignKey('tenant_branches.id', ondelete='SET NULL'), nullable=True)
     code = mapped_column(String(64), nullable=False)
     name = mapped_column(String(255), nullable=False)
-    type = mapped_column(String(64), nullable=True)
+    # NOT NULL with a server default of 'main' in the DB (see alembic/
+    # versions/20260705_1215_u1b2c3d4e5f6_universal_warehousing.py) -- this
+    # was previously declared nullable=True with no default, which doesn't
+    # matter for reads but is wrong for writes: SQLAlchemy decides whether
+    # to omit a column from an INSERT (letting the server default apply)
+    # based on the model's own declaration, not the live DB schema. Every
+    # caller that created a UniversalWarehouse without an explicit type=
+    # was sending an explicit NULL and hitting the DB's NOT NULL constraint
+    # instead of getting 'main'.
+    type = mapped_column(String(64), server_default='main', nullable=False)
     status = mapped_column(String(32), server_default='active', nullable=False)
     manager_id = mapped_column(UUID(as_uuid=True), ForeignKey('user_accounts.id', ondelete='SET NULL'), nullable=True)
     capacity_sqft = mapped_column(Numeric(15, 2), server_default='0.0', nullable=False)
@@ -94,4 +103,25 @@ class UniversalStockTransaction(Base):
     quantity = mapped_column(Numeric(15, 4), nullable=False)
     metadata_ = mapped_column("metadata", JSONB(astext_type=Text()), server_default='{}', nullable=False)
     user_id = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), server_default=text('now()'), nullable=False)
+
+class StockReservation(Base):
+    """
+    Time-bound stock hold created by create_quotation_with_stock_check
+    (app/services/sales_fulfillment.py) -- distinct from the older
+    quantity_reserved/quantity_allocated counters on UniversalStockBalance
+    above (no expiry, no quotation link, used by the separate reserve_stock/
+    allocate_stock crud functions). Availability checks for both new
+    quotations and invoice-time stock deduction sum active (unexpired) rows
+    here; expired rows simply stop counting against availability rather
+    than requiring an explicit cleanup job.
+    """
+    __tablename__ = 'stock_reservations'
+    id = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text('uuid_generate_v4()'))
+    tenant_id = mapped_column(UUID(as_uuid=True), ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False, index=True)
+    item_id = mapped_column(UUID(as_uuid=True), ForeignKey('universal_item_master.id', ondelete='CASCADE'), nullable=False, index=True)
+    warehouse_id = mapped_column(UUID(as_uuid=True), ForeignKey('universal_warehouses.id', ondelete='CASCADE'), nullable=False, index=True)
+    quotation_id = mapped_column(UUID(as_uuid=True), ForeignKey('universal_sales_quotations.id', ondelete='CASCADE'), nullable=False, index=True)
+    quantity = mapped_column(Numeric(15, 4), nullable=False)
+    expires_at = mapped_column(DateTime(timezone=True), nullable=False)
     created_at = mapped_column(DateTime(timezone=True), server_default=text('now()'), nullable=False)

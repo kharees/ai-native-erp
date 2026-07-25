@@ -21,10 +21,28 @@ Usage
 
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncGenerator
+
+# structlog has no explicit structlog.configure() anywhere in this codebase
+# -- every logger uses its default PrintLoggerFactory, which writes to
+# sys.stdout using whatever encoding the process started with. On Windows,
+# that's the console's codepage (cp1252), not UTF-8. Any log call whose
+# message contains a character outside that codepage (e.g. an em-dash from
+# an upstream error message) raises UnicodeEncodeError *from inside the
+# logging call itself* -- including from global_exception_handler below,
+# which turns "log the real error" into "crash while trying to log it,"
+# discarding the real error and returning an opaque 500 with zero detail.
+# Reconfiguring stdout/stderr to UTF-8 (replacing anything truly
+# unencodable rather than raising) must happen before structlog's default
+# logger is ever used -- as early as possible in this module.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import structlog
 from fastapi import FastAPI, Request, Response, status
@@ -38,6 +56,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
 from app.core.database import check_db_health, close_db, init_db
 from app.core.rate_limit import limiter
+from app.core.storage_security import verify_order_capture_bucket_is_private
 
 # ---------------------------------------------------------------------------
 # Structured logging
@@ -113,6 +132,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Startup:
       • Warms the asyncpg connection pool with a probe query.
       • Creates the Supabase async client singleton.
+      • Verifies the order-capture photo Storage bucket is private (logs
+        CRITICAL, and refuses to start in production, if it isn't -- see
+        app/core/storage_security.py and SECURITY_NOTES.md).
       • Records the application start timestamp.
 
     Shutdown:
@@ -129,6 +151,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     await init_db()
+    await verify_order_capture_bucket_is_private()
     log.info("app_ready")
 
     yield  # ← application runs here
@@ -252,12 +275,22 @@ async def finance_core_error_handler(request: Request, exc: FinanceCoreError) ->
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    """5 login attempts per IP per 15 minutes (see auth.py::login) — brute-force protection."""
+    """Shared across every rate-limited route (login brute-force
+    protection, AI chat, order-capture uploads — see
+    app/core/rate_limit.py) — exc.detail is slowapi's own rendering of the
+    specific limit that was hit (e.g. "20 per 1 minute"), so this handler
+    doesn't need to know which endpoint/limit triggered it. Structured the
+    same way as the app's other dict-detail error bodies (see
+    order_capture.py's 413/415 responses)."""
     request_id = getattr(request.state, "request_id", "unknown")
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={
-            "detail": "Too many login attempts. Please try again in 15 minutes.",
+            "detail": {
+                "error": True,
+                "type": "rate_limit_exceeded",
+                "message": f"Rate limit exceeded ({exc.detail}). Please slow down and try again later.",
+            },
             "request_id": request_id,
         },
     )

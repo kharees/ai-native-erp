@@ -33,6 +33,7 @@ from app.agent.tools.base import ToolDefinition
 from app.agent.tools.billing_tools import BILLING_TOOLS
 from app.core.database import db_session
 from app.middleware.rbac import _clear_permission_cache
+from app.crud import universal_warehousing as crud_warehousing
 from app.models.rbac import TenantPermission, TenantRole, TenantRolePermission, TenantUserRole
 from app.models.tenants import Tenant
 from app.models.auth import UserAccount
@@ -40,7 +41,10 @@ from app.models.users import UserProfile
 from app.models.universal_customers import UniversalCustomer
 from app.models.universal_inventory import UniversalItemMaster
 from app.models.universal_invoices import UniversalTaxInvoice
+from app.models.universal_ledger import UniversalInventoryLedger
+from app.models.universal_warehousing import UniversalStockBalance, UniversalStockTransaction, UniversalWarehouse
 from app.models.idempotency import IdempotencyKey
+from app.schemas.universal_warehousing import StockMovementRequest
 from app.services.ai.base import AIToolCall, AIToolCallResult
 
 pytestmark = pytest.mark.asyncio
@@ -87,9 +91,23 @@ async def _make_tenant_and_user(permissions: list[tuple[str, str, str]]) -> tupl
             db.add(role)
             await db.flush()
             for module, feature, action in permissions:
-                perm = TenantPermission(module=module, feature=feature, action=action)
-                db.add(perm)
-                await db.flush()
+                # TenantPermission is a global catalog table (no tenant_id,
+                # unique on (module, feature, action)) -- get-or-create
+                # rather than blind-insert, since a full-suite run has many
+                # tests requesting the same tuple and this file's own
+                # cleanup never deletes catalog rows (correctly -- other
+                # tests running concurrently/afterward may still need them).
+                perm = (await db.execute(
+                    select(TenantPermission).where(
+                        TenantPermission.module == module,
+                        TenantPermission.feature == feature,
+                        TenantPermission.action == action,
+                    )
+                )).scalar_one_or_none()
+                if perm is None:
+                    perm = TenantPermission(module=module, feature=feature, action=action)
+                    db.add(perm)
+                    await db.flush()
                 db.add(TenantRolePermission(role_id=role.id, permission_id=perm.id, conditions={}))
                 await db.flush()
             db.add(TenantUserRole(tenant_id=tenant.id, user_id=profile.id, role_id=role.id))
@@ -118,12 +136,36 @@ async def _make_item(tenant_id: uuid.UUID) -> uuid.UUID:
         return item.id
 
 
+async def _make_warehouse(tenant_id: uuid.UUID) -> uuid.UUID:
+    async with db_session() as db:
+        warehouse = UniversalWarehouse(tenant_id=tenant_id, name="Orchestrator Test WH", code=f"ORCH-WH-{uuid.uuid4().hex[:8]}")
+        db.add(warehouse)
+        await db.flush()
+        await db.refresh(warehouse)
+        return warehouse.id
+
+
+async def _seed_stock(tenant_id: uuid.UUID, item_id: uuid.UUID, warehouse_id: uuid.UUID, quantity: float) -> None:
+    async with db_session() as db:
+        await crud_warehousing.execute_stock_movement(
+            db, tenant_id, None,
+            StockMovementRequest(
+                item_id=item_id, warehouse_id=warehouse_id, transaction_type="IN",
+                reference_type="test_seed", quantity=quantity,
+            ),
+        )
+
+
 async def _cleanup(*tenant_ids: uuid.UUID) -> None:
     async with db_session() as db:
         for tenant_id in tenant_ids:
             await db.execute(delete(IdempotencyKey).where(IdempotencyKey.tenant_id == tenant_id))
+            await db.execute(delete(UniversalInventoryLedger).where(UniversalInventoryLedger.tenant_id == tenant_id))
+            await db.execute(delete(UniversalStockTransaction).where(UniversalStockTransaction.tenant_id == tenant_id))
+            await db.execute(delete(UniversalStockBalance).where(UniversalStockBalance.tenant_id == tenant_id))
             await db.execute(delete(UniversalTaxInvoice).where(UniversalTaxInvoice.tenant_id == tenant_id))
             await db.execute(delete(UniversalItemMaster).where(UniversalItemMaster.tenant_id == tenant_id))
+            await db.execute(delete(UniversalWarehouse).where(UniversalWarehouse.tenant_id == tenant_id))
             await db.execute(delete(UniversalCustomer).where(UniversalCustomer.tenant_id == tenant_id))
             await db.execute(delete(TenantUserRole).where(TenantUserRole.tenant_id == tenant_id))
             await db.execute(delete(TenantRolePermission).where(
@@ -169,7 +211,6 @@ async def test_money_mutating_tool_pauses_for_confirmation_and_dispatches_nothin
     try:
         proposed_call = _call("create_invoice", {
             "customer_id": str(customer_id),
-            "invoice_number": "INV-CONFIRM-1",
             "items": [{"item_id": str(item_id), "quantity": 1, "unit_price": 10.0, "line_total": 10.0}],
         })
         provider = _ScriptedProvider([AIToolCallResult(text=None, tool_calls=[proposed_call])])
@@ -196,10 +237,12 @@ async def test_resume_confirmed_dispatches_exact_call_and_creates_real_row():
     tenant_id, user_id = await _make_tenant_and_user(_ALL_BILLING_PERMISSIONS)
     customer_id = await _make_customer(tenant_id)
     item_id = await _make_item(tenant_id)
+    warehouse_id = await _make_warehouse(tenant_id)
+    await _seed_stock(tenant_id, item_id, warehouse_id, 1)
     try:
         proposed_call = _call("create_invoice", {
             "customer_id": str(customer_id),
-            "invoice_number": "INV-CONFIRM-2",
+            "warehouse_id": str(warehouse_id),
             "items": [{"item_id": str(item_id), "quantity": 1, "unit_price": 20.0, "line_total": 20.0}],
         }, call_id="call_abc")
 
@@ -224,13 +267,17 @@ async def test_resume_confirmed_dispatches_exact_call_and_creates_real_row():
             invoice = (await verify_db.execute(
                 select(UniversalTaxInvoice).where(UniversalTaxInvoice.tenant_id == tenant_id)
             )).scalar_one()
-            assert invoice.invoice_number == "INV-CONFIRM-2"
+            # Server-generated (GST-compliant, gapless numbering -- see
+            # app/services/gst_compliance.py), not the arbitrary literal the
+            # caller no longer even has the option of supplying.
+            assert invoice.invoice_number.startswith("INV/")
 
             # idempotency_key used was exactly f"{conversation_id}:{tool_call_id}"
             # -- the captured id, not a freshly generated one.
             claim = (await verify_db.execute(
                 select(IdempotencyKey).where(
-                    IdempotencyKey.tenant_id == tenant_id, IdempotencyKey.endpoint == "agent.create_invoice"
+                    IdempotencyKey.tenant_id == tenant_id,
+                    IdempotencyKey.endpoint == "sales.invoice_with_stock_deduction",
                 )
             )).scalar_one()
             assert claim.key == "conv-3:call_abc"
@@ -246,7 +293,6 @@ async def test_resume_declined_dispatches_nothing():
     try:
         proposed_call = _call("create_invoice", {
             "customer_id": str(customer_id),
-            "invoice_number": "INV-DECLINE-1",
             "items": [{"item_id": str(item_id), "quantity": 1, "unit_price": 5.0, "line_total": 5.0}],
         })
         pause = await run_turn(
@@ -322,56 +368,84 @@ async def test_unknown_tool_name_handled_gracefully():
 
 async def test_stuck_conflict_classified_via_real_idempotency_race():
     """create_invoice requires confirmation, so the only path that ever
-    dispatches it is resume_after_confirmation -- this drives that path
-    twice with the EXACT same pending_tool_call (same id, so same
-    idempotency_key) to reproduce a genuine 409 from
-    app/services/idempotency.py, not a simulated one. The first attempt's
-    customer-ownership rejection (404) is what leaves the claim stuck in
-    status="pending" -- the same real, pre-existing behavior documented
-    in docs/production-hardening.md, "Orchestrator retry logic MUST
-    account for...".
+    dispatches it is resume_after_confirmation. To reproduce a genuine 409
+    from app/services/idempotency.py (not a simulated one), a real,
+    freshly-created "pending" IdempotencyKey row is inserted directly
+    under the exact key resume_after_confirmation will use
+    (f"{conversation_id}:{tool_call_id}", see run_turn/resume_after_
+    confirmation's own docstrings) -- simulating another request for the
+    same tool call that is genuinely still in flight.
+
+    Previously this test manufactured a "stuck" claim by having a first
+    attempt fail validation (customer ownership) and rely on the claim
+    being left behind afterward -- that was the exact bug
+    app/services/idempotency.py's release_idempotency_key now fixes (a
+    rejected request no longer leaves its claim behind at all), so that
+    approach no longer reproduces a stuck claim. A directly-inserted,
+    still-genuinely-pending row is the correct way to exercise
+    STUCK_CONFLICT classification now -- see
+    tests/omnichannel_billing/test_idempotency_release.py for the
+    complementary "a rejected request's claim really is gone, and a
+    genuinely in-flight one still 409s" regression tests.
     """
     tenant_id, user_id = await _make_tenant_and_user(_ALL_BILLING_PERMISSIONS)
-    other_tenant_id, _ = await _make_tenant_and_user(permissions=[])
-    customer_in_other_tenant = await _make_customer(other_tenant_id)  # doesn't belong to tenant_id
+    item_id = await _make_item(tenant_id)
+    warehouse_id = await _make_warehouse(tenant_id)
+    customer_id = await _make_customer(tenant_id)
+    await _seed_stock(tenant_id, item_id, warehouse_id, 10)
+    conversation_id = "conv-7"
+    call_id = "call_stuck"
     try:
-        bad_call = _call("create_invoice", {
-            "customer_id": str(customer_in_other_tenant),
-            "invoice_number": "INV-STUCK-1",
-            "items": [{"item_id": str(uuid.uuid4()), "quantity": 1, "unit_price": 1.0, "line_total": 1.0}],
-        }, call_id="call_stuck")
+        proposed_call = _call("create_invoice", {
+            "customer_id": str(customer_id),
+            "warehouse_id": str(warehouse_id),
+            "items": [{"item_id": str(item_id), "quantity": 1, "unit_price": 1.0, "line_total": 1.0}],
+        }, call_id=call_id)
 
-        first_pause = await run_turn(
-            tenant_id=tenant_id, user_id=user_id, conversation_id="conv-7",
+        pause = await run_turn(
+            tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id,
             messages=[{"role": "user", "content": "invoice a customer"}],
-            provider=_ScriptedProvider([AIToolCallResult(text=None, tool_calls=[bad_call])]),
+            provider=_ScriptedProvider([AIToolCallResult(text=None, tool_calls=[proposed_call])]),
             tools=BILLING_TOOLS,
         )
-        first_resume = await resume_after_confirmation(
-            tenant_id=tenant_id, user_id=user_id, conversation_id="conv-7",
-            messages=first_pause.messages, pending_tool_call=first_pause.pending_tool_call, confirmed=True,
-            provider=_ScriptedProvider([AIToolCallResult(text="That customer wasn't found.", tool_calls=[])]),
-            tools=BILLING_TOOLS,
-        )
-        first_tool_result = next(m for m in first_resume.messages if m.get("role") == "tool_result")
-        assert "validation_error" in first_tool_result["content"]
 
-        # Same pending_tool_call again -- the underlying claim is now
-        # genuinely stuck "pending" from the rejected first attempt.
-        second_resume = await resume_after_confirmation(
-            tenant_id=tenant_id, user_id=user_id, conversation_id="conv-7",
-            messages=first_pause.messages, pending_tool_call=first_pause.pending_tool_call, confirmed=True,
+        # A genuinely in-flight claim for the exact call about to be
+        # resumed -- same key resume_after_confirmation will derive.
+        async with db_session() as db:
+            db.add(IdempotencyKey(
+                tenant_id=tenant_id, endpoint="sales.invoice_with_stock_deduction",
+                key=f"{conversation_id}:{call_id}", status="pending",
+            ))
+            await db.commit()
+
+        resume = await resume_after_confirmation(
+            tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id,
+            messages=pause.messages, pending_tool_call=pause.pending_tool_call, confirmed=True,
             provider=_ScriptedProvider([AIToolCallResult(text="That could not be created; it may already be in progress.", tool_calls=[])]),
             tools=BILLING_TOOLS,
         )
-        second_tool_result = next(
-            m for m in second_resume.messages[len(first_pause.messages):] if m.get("role") == "tool_result"
+        tool_result = next(
+            m for m in resume.messages[len(pause.messages):] if m.get("role") == "tool_result"
         )
-        assert "stuck_conflict" in second_tool_result["content"]
-        assert "may already be in progress" in second_tool_result["content"]
+        assert "stuck_conflict" in tool_result["content"]
+        assert "may already be in progress" in tool_result["content"]
+
+        # Nothing was created, and the claim is untouched -- still pending.
+        async with db_session() as verify_db:
+            invoices = (await verify_db.execute(
+                select(UniversalTaxInvoice).where(UniversalTaxInvoice.tenant_id == tenant_id)
+            )).scalars().all()
+            assert invoices == []
+            claim_row = (await verify_db.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.tenant_id == tenant_id,
+                    IdempotencyKey.endpoint == "sales.invoice_with_stock_deduction",
+                    IdempotencyKey.key == f"{conversation_id}:{call_id}",
+                )
+            )).scalar_one()
+            assert claim_row.status == "pending"
     finally:
         await _cleanup(tenant_id)
-        await _cleanup(other_tenant_id)
 
 
 async def test_stuck_call_id_not_retried_within_same_batch():

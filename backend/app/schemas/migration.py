@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.migration import MigrationStatus
+from app.models.migration import MigrationJobStatus
 
 
 class DataMigrationLogBase(BaseModel):
@@ -25,7 +25,7 @@ class DataMigrationLogCreate(DataMigrationLogBase):
     """
     Parameters used when initializing a new migration batch job.
     """
-    migration_status: MigrationStatus = Field(default=MigrationStatus.INITIALIZED)
+    migration_status: MigrationJobStatus = Field(default=MigrationJobStatus.UPLOADED)
 
 
 class DataMigrationLogResponse(DataMigrationLogBase):
@@ -34,7 +34,7 @@ class DataMigrationLogResponse(DataMigrationLogBase):
     """
     id: UUID
     tenant_id: UUID
-    migration_status: MigrationStatus
+    migration_status: MigrationJobStatus
     error_log_dump: Optional[str] = None
     
     is_active: bool

@@ -92,26 +92,21 @@ _db_stub.Base = Base  # type: ignore[attr-defined]
 # module was somehow already imported (e.g. in testing) we don't clobber it.
 sys.modules.setdefault("app.core.database", _db_stub)
 
-# Import each model module — triggers table registration on Base.metadata.
-# Add new model modules here as they are created.
-import app.models.inventory  # noqa: F401  — registers InventoryItem
-import app.models.billing  # noqa: F401  — registers TenantBillingInvoice
-import app.models.finance  # noqa: F401  — registers TenantFinanceLedger
-import app.models.migration  # noqa: F401  — registers TenantDataMigrationLog
-import app.models.universal_customers  # noqa: F401
-import app.models.universal_sales  # noqa: F401
-import app.models.universal_numbering  # noqa: F401
-import app.models.universal_taxes  # noqa: F401
-import app.models.universal_invoices  # noqa: F401
-import app.models.universal_documents  # noqa: F401
-import app.models.universal_returns  # noqa: F401
-import app.models.universal_banks  # noqa: F401
-import app.models.universal_payments  # noqa: F401
-import app.models.universal_pos  # noqa: F401
-import app.models.universal_omnichannel  # noqa: F401
-import app.models.universal_shipping  # noqa: F401
-import app.models.universal_ai_billing  # noqa: F401
-import app.models.auth  # noqa: F401
+# Import every model module under app/models/ — triggers table registration
+# on Base.metadata. Previously a hand-maintained list of explicit imports;
+# that list had silently drifted 17 model files out of date (missing even
+# app.models.tenants, the table nearly everything else foreign-keys to),
+# which meant autogenerate could never see roughly 68 of this project's 110
+# model-defined tables at all — the actual root cause of those tables never
+# having a real migration. Importing every file in the directory instead of
+# hand-listing them makes that entire class of drift impossible going
+# forward: a new model file is automatically picked up with no edit here.
+import importlib
+
+_models_dir = os.path.join(_backend_root, "app", "models")
+for _fname in sorted(os.listdir(_models_dir)):
+    if _fname.endswith(".py") and _fname != "__init__.py":
+        importlib.import_module(f"app.models.{_fname[:-3]}")
 
 
 
