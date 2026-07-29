@@ -62,25 +62,69 @@ from typing import Any
 
 import structlog
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.tools import BILLING_TOOLS
+from app.agent.tools.analytics_tools import ANALYTICS_TOOLS
 from app.agent.tools.base import ToolDefinition
+from app.agent.tools.billing_tools import BILLING_TOOLS
+from app.agent.tools.finance_tools import FINANCE_TOOLS
+from app.agent.tools.inventory_tools import INVENTORY_TOOLS
+from app.agent.tools.migration_tools import MIGRATION_TOOLS
+from app.agent.tools.security_tools import SECURITY_TOOLS
 from app.core.database import db_session
 from app.middleware.rbac import check_permission
 from app.services.ai.base import AIMessage, AIProvider, AIToolCall
 from app.services.ai.factory import get_ai_provider
 
+# Every registered tool module -- get_tools_for_user (below) is the single
+# place that knows the full set; no other module should need its own
+# "all tools" list.
+_ALL_TOOL_MODULES: list[list[ToolDefinition]] = [
+    BILLING_TOOLS, FINANCE_TOOLS, INVENTORY_TOOLS, MIGRATION_TOOLS, SECURITY_TOOLS, ANALYTICS_TOOLS,
+]
+
 log = structlog.get_logger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 5
 
+# Broadened from a Billing-only prompt to this general-purpose one as part
+# of the 5-copilot consolidation: get_tools_for_user (the default tool
+# source whenever a caller doesn't pass an explicit `tools=`) now spans
+# billing, finance, inventory, migration, and security tools, not just
+# Billing -- the default system prompt needs to match that breadth rather
+# than telling the model it's "a billing assistant" while handing it a
+# get_org_risk_score tool. No test depended on the old wording (checked
+# before changing it).
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a billing assistant for a multi-tenant ERP. Use the available "
-    "tools to look up customers, create invoices, and record payments on "
-    "the user's behalf. Never invent amounts, customer IDs, or item IDs -- "
-    "look them up with search_customer or ask the user if you don't have "
-    "them. create_invoice can only create non-tax / zero-tax invoices; say "
-    "so plainly if the user asks for tax handling this system doesn't support."
+    "You are an operations assistant for a multi-tenant ERP, with tools "
+    "spanning billing, finance, inventory, migration, and security/identity. "
+    "Use the available tools to look up real data and, where the tools "
+    "support it, take actions on the user's behalf. Never invent amounts, "
+    "IDs, dates, or any other figure -- look it up with a search/read tool "
+    "or ask the user if you don't have it. Money-mutating or stock-mutating "
+    "actions (e.g. create_invoice, record_payment, execute_stock_movement) "
+    "require the user's explicit confirmation before they execute -- this is "
+    "enforced by the system, not just this instruction. create_invoice can "
+    "only create non-tax / zero-tax invoices; say so plainly if the user "
+    "asks for tax handling this system doesn't support."
+)
+
+# Compose into a caller's system prompt when app.agent.tools.analytics_tools'
+# ANALYTICS_TOOLS are included in a run_turn/resume_after_confirmation call
+# -- e.g. system=DEFAULT_SYSTEM_PROMPT + " " + ANALYTICS_SYSTEM_PROMPT_ADDITION.
+# Not folded into DEFAULT_SYSTEM_PROMPT itself: callers that don't include
+# ANALYTICS_TOOLS shouldn't have this instruction appended for tools they
+# can't even call. (app/api/v1/endpoints/agent_chat.py, the unified chat
+# endpoint, always includes it -- get_tools_for_user always considers
+# ANALYTICS_TOOLS in its merge.)
+ANALYTICS_SYSTEM_PROMPT_ADDITION = (
+    "You also have read-only analytics tools (sales summaries, top items, "
+    "low stock, outstanding dues, customer summaries). Every figure they "
+    "return comes from a real database query -- state only what a tool "
+    "actually returned. Never estimate, extrapolate, round significantly, "
+    "or fill in a number a tool didn't provide, even if asked to guess or "
+    "approximate. If a question needs a figure no available tool provides, "
+    "say so explicitly instead of approximating one."
 )
 
 _DEFERRED_DETAIL = (
@@ -134,6 +178,28 @@ def _tool_result_message(tool_call_id: str, payload: dict[str, Any]) -> AIMessag
 async def _check_tool_permission(tool: ToolDefinition, tenant_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     async with db_session() as db:
         return await check_permission(db, tenant_id, user_id, *tool.required_permission)
+
+
+async def get_tools_for_user(tenant_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> list[ToolDefinition]:
+    """
+    Merges every registered tool module (billing, finance, inventory,
+    migration, security, analytics -- see _ALL_TOOL_MODULES) and filters
+    to only the tools this user's RBAC permissions actually allow, BEFORE
+    the tool list is ever sent to the model.
+
+    This is defense-in-depth / UX, not the only enforcement boundary: a
+    tool this filters out can never even be proposed, but _dispatch's own
+    check_permission call (via _check_tool_permission) remains the real
+    enforcement point regardless -- a tool call is never dispatched on
+    trust that the model only saw permitted tools; the same check runs
+    again right before every dispatch.
+    """
+    all_tools = [tool for module in _ALL_TOOL_MODULES for tool in module]
+    allowed: list[ToolDefinition] = []
+    for tool in all_tools:
+        if await check_permission(db, tenant_id, user_id, *tool.required_permission):
+            allowed.append(tool)
+    return allowed
 
 
 async def _dispatch(
@@ -202,7 +268,11 @@ async def run_turn(
     come from the caller's authenticated context, never from model output.
     """
     provider = provider or get_ai_provider()
-    tool_list = tools if tools is not None else BILLING_TOOLS
+    if tools is not None:
+        tool_list = tools
+    else:
+        async with db_session() as db:
+            tool_list = await get_tools_for_user(tenant_id, user_id, db)
     tools_by_name = {t.name: t for t in tool_list}
     provider_tools = [t.to_provider_schema() for t in tool_list]
 
@@ -292,7 +362,11 @@ async def resume_after_confirmation(
     arguments, or idempotency_key = f"{conversation_id}:{tool_call_id}"
     silently reuses the old key for what is actually a different action.
     """
-    tool_list = tools if tools is not None else BILLING_TOOLS
+    if tools is not None:
+        tool_list = tools
+    else:
+        async with db_session() as db:
+            tool_list = await get_tools_for_user(tenant_id, user_id, db)
     tools_by_name = {t.name: t for t in tool_list}
     tool = tools_by_name.get(pending_tool_call["name"])
 

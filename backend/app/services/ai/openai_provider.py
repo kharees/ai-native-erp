@@ -12,14 +12,40 @@ from typing import Any
 import structlog
 from openai import AsyncOpenAI, APIError, APIConnectionError, AuthenticationError
 
-from app.services.ai.base import AIMessage, AIProvider, AIProviderError, AIToolCall, AIToolCallResult
+from app.services.ai.base import AIMessage, AIProvider, AIProviderError, AIToolCall, AIToolCallResult, message_has_image
 
 log = structlog.get_logger(__name__)
+
+# Best-effort denylist of known text-only OpenAI models -- err toward NOT
+# rejecting an unlisted/newer model name (a real API-level error on a
+# genuinely non-vision model is an acceptable fallback; incorrectly
+# blocking a real vision-capable model is not). gpt-4o/gpt-4-turbo/gpt-4.1/
+# o1/o3 (except o1-mini, text-only) all support vision; gpt-3.5 and the
+# legacy completion models never did.
+_NON_VISION_MODEL_MARKERS = ("gpt-3.5", "o1-mini", "davinci", "curie", "babbage", "ada")
+
+
+def _model_supports_vision(model: str) -> bool:
+    lowered = model.lower()
+    return not any(marker in lowered for marker in _NON_VISION_MODEL_MARKERS)
+
+
+def _to_openai_content(content: str | list[dict[str, Any]] | None) -> Any:
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for block in content:
+        if block["type"] == "image":
+            data_url = f"data:{block['media_type']};base64,{block['data']}"
+            parts.append({"type": "image_url", "image_url": {"url": data_url}})
+        else:
+            parts.append({"type": "text", "text": block["text"]})
+    return parts
 
 
 def _to_openai_messages(messages: list[AIMessage]) -> list[dict[str, Any]]:
     """Translates the provider-agnostic AIMessage list (see base.py) into
-    OpenAI's wire format. The two non-trivial cases:
+    OpenAI's wire format. The non-trivial cases:
 
     - An assistant turn that made tool calls carries a `tool_calls` list
       alongside (possibly None) `content` -- and each call's arguments
@@ -30,14 +56,19 @@ def _to_openai_messages(messages: list[AIMessage]) -> list[dict[str, Any]]:
     - A "tool_result" turn (this codebase's role, not OpenAI's) becomes a
       `role: "tool"` message referencing tool_call_id -- OpenAI does have
       a dedicated tool role, unlike Anthropic.
+    - A plain turn whose content is a list[AIContentBlock] (see base.py)
+      becomes OpenAI's own multipart content array, translating each
+      image block into an image_url part with a base64 data: URL (OpenAI
+      has no separate base64-source field the way Anthropic does).
     """
     out: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role")
+        content = msg.get("content")
         if role == "assistant" and msg.get("tool_calls"):
             out.append({
                 "role": "assistant",
-                "content": msg.get("content"),
+                "content": content,
                 "tool_calls": [
                     {
                         "id": call["id"],
@@ -48,9 +79,11 @@ def _to_openai_messages(messages: list[AIMessage]) -> list[dict[str, Any]]:
                 ],
             })
         elif role == "tool_result":
-            out.append({"role": "tool", "tool_call_id": msg["tool_call_id"], "content": msg.get("content") or ""})
+            out.append({"role": "tool", "tool_call_id": msg["tool_call_id"], "content": content or ""})
+        elif isinstance(content, list):
+            out.append({"role": role, "content": _to_openai_content(content)})
         else:
-            out.append({"role": role, "content": msg.get("content") or ""})
+            out.append({"role": role, "content": content or ""})
     return out
 
 
@@ -69,10 +102,17 @@ class OpenAIProvider(AIProvider):
         max_tokens: int = 1024,
         temperature: float = 0.7,
     ) -> str:
+        if message_has_image(messages) and not _model_supports_vision(self._model):
+            raise AIProviderError(
+                f"Model '{self._model}' does not support image input. "
+                f"Configure a vision-capable model (e.g. via AI_MODEL_VISION / "
+                f"get_ai_provider(model=...)) to send images."
+            )
+
         openai_messages = []
         if system:
             openai_messages.append({"role": "system", "content": system})
-        openai_messages.extend(messages)
+        openai_messages.extend(_to_openai_messages(messages))
 
         try:
             response = await self._client.chat.completions.create(
@@ -105,6 +145,13 @@ class OpenAIProvider(AIProvider):
         max_tokens: int = 1024,
         temperature: float = 0.7,
     ) -> AIToolCallResult:
+        if message_has_image(messages) and not _model_supports_vision(self._model):
+            raise AIProviderError(
+                f"Model '{self._model}' does not support image input. "
+                f"Configure a vision-capable model (e.g. via AI_MODEL_VISION / "
+                f"get_ai_provider(model=...)) to send images."
+            )
+
         # tools arrives as {"name", "description", "input_schema"} per
         # entry (Anthropic's native shape, shared across providers per
         # base.py's docstring) -- wrap each into OpenAI's function-call shape.

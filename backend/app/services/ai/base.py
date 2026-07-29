@@ -42,7 +42,24 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+
+class AITextBlock(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class AIImageBlock(TypedDict):
+    """data is raw base64 (no "data:" URL prefix, no whitespace/newlines --
+    each provider's translator wraps it in whatever envelope that
+    provider's wire format needs)."""
+    type: Literal["image"]
+    media_type: str  # e.g. "image/jpeg", "image/png"
+    data: str
+
+
+AIContentBlock = AITextBlock | AIImageBlock
 
 
 class AIToolCall(TypedDict):
@@ -76,11 +93,36 @@ class AIMessage(TypedDict, total=False):
     (existing callers always set both); tool_calls and tool_call_id are
     the only genuinely optional keys, present on exactly one of the two
     new turn shapes above.
+
+    content also accepts list[AIContentBlock] (a mix of AITextBlock/
+    AIImageBlock) instead of a plain str, for multimodal turns:
+        {"role": "user", "content": [
+            {"type": "text", "text": "What's in this image?"},
+            {"type": "image", "media_type": "image/jpeg", "data": "<base64>"},
+        ]}
+    Only meaningful on plain user/assistant turns (the ones handled by
+    this docstring's first bullet) -- tool_calls/tool_result turns don't
+    carry images in this codebase; each provider's translator only looks
+    for list-shaped content on that plain-turn branch.
     """
     role: str
-    content: str | None
+    content: str | list[AIContentBlock] | None
     tool_calls: list[AIToolCall]
     tool_call_id: str
+
+
+def message_has_image(messages: list[AIMessage]) -> bool:
+    """True if any message's content contains an image block. Shared
+    across all three providers' complete()/complete_with_tools() so each
+    can refuse up front (AIProviderError, not a silent drop) when its
+    configured model doesn't support vision -- see each provider's own
+    _model_supports_vision()."""
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            if any(isinstance(block, dict) and block.get("type") == "image" for block in content):
+                return True
+    return False
 
 
 @dataclass

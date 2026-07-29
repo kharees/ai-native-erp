@@ -63,19 +63,18 @@ from fastapi import HTTPException
 from app.agent.tools.base import ToolDefinition
 from app.core.database import db_session
 from app.crud import universal_customers as crud_customers
-from app.crud import universal_invoices as crud_invoices
 from app.crud import universal_payments as crud_payments
 from app.schemas.universal_customers import UniversalCustomerResponse
 from app.schemas.universal_invoices import (
-    UniversalTaxInvoiceCreate,
+    UniversalTaxInvoiceCreateWithStock,
     UniversalTaxInvoiceItemCreate,
-    UniversalTaxInvoiceResponse,
 )
 from app.schemas.universal_payments import (
     UniversalPaymentReceiptCreate,
     UniversalPaymentReceiptResponse,
 )
-from app.services.idempotency import claim_idempotency_key, complete_idempotency_key
+from app.services import sales_fulfillment
+from app.services.idempotency import claim_idempotency_key, complete_idempotency_key, release_idempotency_key
 from app.services.agent_adapters.base import agent_tool
 
 
@@ -106,7 +105,10 @@ _CREATE_INVOICE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "customer_id": {"type": "string", "format": "uuid"},
-        "invoice_number": {"type": "string", "maxLength": 64},
+        "warehouse_id": {
+            "type": "string", "format": "uuid",
+            "description": "Location stock is deducted from for every line item on this invoice.",
+        },
         "currency": {"type": "string", "maxLength": 3, "default": "INR"},
         "is_tax_inclusive": {"type": "boolean", "default": False},
         "items": {
@@ -127,7 +129,7 @@ _CREATE_INVOICE_SCHEMA: dict[str, Any] = {
         "subtotal": {"type": "number", "minimum": 0, "default": 0},
         "total_amount": {"type": "number", "minimum": 0, "default": 0},
     },
-    "required": ["customer_id", "invoice_number", "items"],
+    "required": ["customer_id", "warehouse_id", "items"],
 }
 
 
@@ -137,48 +139,40 @@ async def handle_create_invoice(
     user_id: uuid.UUID,
     idempotency_key: str,
     customer_id: uuid.UUID,
-    invoice_number: str,
+    warehouse_id: uuid.UUID,
     items: list[dict[str, Any]],
     currency: str = "INR",
     is_tax_inclusive: bool = False,
     subtotal: float = 0.0,
     total_amount: float = 0.0,
 ) -> dict[str, Any]:
-    # user_id is accepted (and required) for future audit-trail
-    # attribution even though crud.create_tax_invoice does not currently
-    # take or store it -- neither does its HTTP endpoint counterpart.
-    # Not wiring AuditLogger here: it's Request-bound
-    # (app/services/audit.py) and there's no HTTP request in this call
-    # path; adding audit logging for non-HTTP callers is a separate,
-    # deliberately out-of-scope piece of work.
-    del user_id
+    """Delegates to app/services/sales_fulfillment.py's
+    create_invoice_with_stock_deduction -- invoice creation and stock
+    deduction happen atomically (same db.begin() block), not as two
+    independent, disconnectable steps. That service owns idempotency
+    internally under its own endpoint key ("sales.invoice_with_stock_
+    deduction", not this file's earlier "agent.create_invoice" -- any
+    previously-claimed keys under the old string are simply orphaned, not
+    migrated, since this predates any real production traffic).
 
+    invoice_number is deliberately not a parameter here -- it's a
+    GST-compliant, gapless, per-financial-year sequential number generated
+    server-side by create_invoice_with_stock_deduction itself, not
+    something the AI (or the human it's acting for) gets to choose (see
+    app/services/gst_compliance.py)."""
     async with db_session() as db:
-        claim = await claim_idempotency_key(db, tenant_id, "agent.create_invoice", idempotency_key)
-        if claim.replay_response is not None:
-            return claim.replay_response
-        if claim.conflict:
-            raise HTTPException(
-                status_code=409,
-                detail="A create_invoice call with this idempotency key is already in progress.",
-            )
-
-        payload = UniversalTaxInvoiceCreate(
+        payload = UniversalTaxInvoiceCreateWithStock(
             customer_id=customer_id,
-            invoice_number=invoice_number,
+            warehouse_id=warehouse_id,
             currency=currency,
             is_tax_inclusive=is_tax_inclusive,
             subtotal=subtotal,
             total_amount=total_amount,
             items=[UniversalTaxInvoiceItemCreate(**item) for item in items],
         )
-        obj = await crud_invoices.create_tax_invoice(db, tenant_id, payload)
-        response_body = UniversalTaxInvoiceResponse.model_validate(obj).model_dump(mode="json")
-
-        if claim.should_complete:
-            await complete_idempotency_key(db, tenant_id, "agent.create_invoice", idempotency_key, obj.id, response_body)
-
-        return response_body
+        return await sales_fulfillment.create_invoice_with_stock_deduction(
+            db, tenant_id, user_id, payload, idempotency_key
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -235,22 +229,37 @@ async def handle_record_payment(
                 detail="A record_payment call with this idempotency key is already in progress.",
             )
 
-        payload = UniversalPaymentReceiptCreate(
-            customer_id=customer_id,
-            bank_account_id=bank_account_id,
-            receipt_number=receipt_number,
-            payment_mode=payment_mode,
-            reference_number=reference_number,
-            amount_received=amount_received,
-            unallocated_amount=unallocated_amount,
-        )
-        obj = await crud_payments.create_payment_receipt(db, tenant_id, payload)
-        response_body = UniversalPaymentReceiptResponse.model_validate(obj).model_dump(mode="json")
+        try:
+            payload = UniversalPaymentReceiptCreate(
+                customer_id=customer_id,
+                bank_account_id=bank_account_id,
+                receipt_number=receipt_number,
+                payment_mode=payment_mode,
+                reference_number=reference_number,
+                amount_received=amount_received,
+                unallocated_amount=unallocated_amount,
+            )
+            obj = await crud_payments.create_payment_receipt(db, tenant_id, payload)
+            response_body = UniversalPaymentReceiptResponse.model_validate(obj).model_dump(mode="json")
 
-        if claim.should_complete:
-            await complete_idempotency_key(db, tenant_id, "agent.record_payment", idempotency_key, obj.id, response_body)
+            if claim.should_complete:
+                await complete_idempotency_key(db, tenant_id, "agent.record_payment", idempotency_key, obj.id, response_body)
 
-        return response_body
+            return response_body
+        except Exception:
+            # Unlike create_invoice_with_stock_deduction (which nests its
+            # work in its own `async with db.begin():`), this whole
+            # function body shares db_session()'s single ambient
+            # transaction -- so a failure here must be rolled back
+            # explicitly before release_idempotency_key can safely run its
+            # own delete+commit on the same session. Without this, a
+            # failed record_payment call (after a successful claim) would
+            # leave the claim "pending" forever, same gap as
+            # create_invoice_with_stock_deduction used to have.
+            if claim.should_complete:
+                await db.rollback()
+                await release_idempotency_key(db, tenant_id, "agent.record_payment", idempotency_key)
+            raise
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 tests/test_billing_tool_schemas.py
 =====================================
 Runs the REAL app/agent/tools/billing_tools.py tool definitions (not a
-synthetic sample schema) through complete_with_tools() for both
-providers, with realistically-shaped mocked SDK responses. Purpose:
+synthetic sample schema) through complete_with_tools() for all three
+providers, with realistically-shaped mocked SDK/HTTP responses. Purpose:
 catch a schema-specific translation bug -- e.g. create_invoice's nested
 `items` array getting mangled, or a field name in a tool's input_schema
 silently drifting out of sync with its handler's real parameter names --
@@ -28,6 +28,7 @@ import pytest
 from app.agent.tools.billing_tools import BILLING_TOOLS
 from app.services.ai.anthropic_provider import AnthropicProvider
 from app.services.ai.openai_provider import OpenAIProvider
+from app.services.ai.gemini_provider import GeminiProvider, _sanitize_schema_for_gemini
 from tests.agent_tool_schema_checks import assert_tool_schema_matches_handler
 
 _INJECTED_PARAMS = {"tenant_id", "user_id", "idempotency_key"}
@@ -37,7 +38,7 @@ _INJECTED_PARAMS = {"tenant_id", "user_id", "idempotency_key"}
 _SAMPLE_ARGUMENTS = {
     "create_invoice": {
         "customer_id": str(uuid.uuid4()),
-        "invoice_number": "INV-2026-001",
+        "warehouse_id": str(uuid.uuid4()),
         "currency": "INR",
         "is_tax_inclusive": False,
         "items": [
@@ -103,6 +104,14 @@ def _mock_openai_tool_call_response(call_id: str, name: str, arguments: dict):
     return response
 
 
+def _mock_gemini_tool_call_response(name: str, arguments: dict):
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {
+        "candidates": [{"content": {"parts": [{"functionCall": {"name": name, "args": arguments}}]}}]
+    }
+    return resp
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", ["create_invoice", "record_payment", "search_customer"])
 async def test_real_tool_schema_round_trips_through_anthropic(tool_name):
@@ -131,6 +140,45 @@ async def test_real_tool_schema_round_trips_through_anthropic(tool_name):
     # The parsed arguments are exactly what the real handler would receive
     # as **kwargs -- every key is a real parameter, nothing was dropped or
     # renamed in transit.
+    handler_params = set(inspect.signature(tool.handler).parameters.keys())
+    assert set(result.tool_calls[0]["arguments"].keys()) <= handler_params
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["create_invoice", "record_payment", "search_customer"])
+async def test_real_tool_schema_round_trips_through_gemini(tool_name):
+    tool = _tool_def(tool_name)
+    provider_schema = tool.to_provider_schema()
+    sample_args = _SAMPLE_ARGUMENTS[tool_name]
+
+    provider = GeminiProvider(api_key="test-key", model="gemini-2.0-flash")
+    provider._client.post = AsyncMock(
+        return_value=_mock_gemini_tool_call_response(tool_name, sample_args)
+    )
+
+    result = await provider.complete_with_tools(
+        [{"role": "user", "content": "please do the thing"}], [provider_schema]
+    )
+
+    # The real input_schema -- including create_invoice's nested items
+    # array -- round-trips into Gemini's functionDeclarations wrapper
+    # (nested under "parameters"), modulo exclusiveMinimum/exclusiveMaximum
+    # sanitization (Gemini's schema validator rejects those keywords
+    # outright -- see gemini_provider._sanitize_schema_for_gemini).
+    sent_tools = provider._client.post.call_args.kwargs["json"]["tools"]
+    assert sent_tools == [{
+        "functionDeclarations": [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": _sanitize_schema_for_gemini(tool.input_schema),
+            }
+        ]
+    }]
+
+    assert result.tool_calls[0]["name"] == tool_name
+    assert result.tool_calls[0]["arguments"] == sample_args
+
     handler_params = set(inspect.signature(tool.handler).parameters.keys())
     assert set(result.tool_calls[0]["arguments"].keys()) <= handler_params
 

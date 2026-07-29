@@ -56,16 +56,21 @@ async def _make_tenant_and_user(permissions: list[tuple[str, str, str]]) -> tupl
             db.add(role)
             await db.flush()
             for module, feature, action in permissions:
-                # TenantPermission is a global catalog table (no tenant_id,
-                # unique on (module, feature, action)) -- get-or-create
-                # rather than blind-insert; see test_orchestrator.py's
-                # identical helper for the full rationale.
+                # TenantPermission is a global catalog table, unique on
+                # (module, feature, action) -- see uix_permission_def
+                # (model __table_args__ + migration e2f4a6b8c0d2). Get-or-
+                # create rather than blind-insert; see test_orchestrator.
+                # py's identical helper for the full rationale. .limit(1)
+                # ahead of .scalar_one_or_none(): belt-and-suspenders
+                # against duplicates ever being reintroduced despite the
+                # constraint (same pattern app/middleware/rbac.py's
+                # check_permission already uses).
                 perm = (await db.execute(
                     select(TenantPermission).where(
                         TenantPermission.module == module,
                         TenantPermission.feature == feature,
                         TenantPermission.action == action,
-                    )
+                    ).limit(1)
                 )).scalar_one_or_none()
                 if perm is None:
                     perm = TenantPermission(module=module, feature=feature, action=action)
