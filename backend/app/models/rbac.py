@@ -46,6 +46,20 @@ from app.core.database import Base
 
 class TenantPermission(Base):
     __tablename__ = 'tenant_permissions'
+    # Matches uix_permission_def, already present in this table's
+    # original migration (20260704_1550_d4e5f6a1b2c3_rbac.py) but never
+    # mirrored here -- the real root cause of the duplicate-row bug: any
+    # database bootstrapped via Base.metadata.create_all() (which reads
+    # this model, not the migration file) got a constraint-less table,
+    # letting every non-idempotent get-or-create caller insert its own
+    # copy of the same (module, feature, action) tuple over time. See
+    # 20260728_..._dedupe_and_constrain_tenant_permissions.py for the
+    # migration that both merges any existing duplicates and adds this
+    # constraint (idempotently) to databases -- like this one was -- that
+    # never actually got it from the original migration.
+    __table_args__ = (
+        UniqueConstraint('module', 'feature', 'action', name='uix_permission_def'),
+    )
     id = mapped_column(UUID(), primary_key=True, nullable=False, server_default=text('uuid_generate_v4()'), )
     module = mapped_column(String(length=64), nullable=False, index=True, )
     feature = mapped_column(String(length=64), nullable=False, index=True, )
