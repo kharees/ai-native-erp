@@ -26,6 +26,14 @@ class UniversalSalesQuotation(Base):
     valid_until = mapped_column(DateTime(timezone=True), nullable=True)
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
+    # lazy="raise" ensures selectinload is used on every read path that
+    # serializes items — prevents silent N+1 / MissingGreenlet errors.
+    items = relationship(
+        "UniversalSalesQuotationItem",
+        back_populates="quotation",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
 
 class UniversalSalesQuotationItem(Base):
     __tablename__ = 'universal_sales_quotation_items'
@@ -37,6 +45,7 @@ class UniversalSalesQuotationItem(Base):
     unit_price = mapped_column(Numeric(15, 2), nullable=False)
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
+    quotation = relationship("UniversalSalesQuotation", back_populates="items")
 
 class UniversalSalesOrder(Base):
     __tablename__ = 'universal_sales_orders'
@@ -50,6 +59,14 @@ class UniversalSalesOrder(Base):
     total_amount = mapped_column(Numeric(15, 2), nullable=False, server_default=text('0.00'))
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
+    # lazy="raise" ensures selectinload is used on every read path that
+    # serializes items — prevents silent N+1 / MissingGreenlet errors.
+    items = relationship(
+        "UniversalSalesOrderItem",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
 
 class UniversalSalesOrderItem(Base):
     __tablename__ = 'universal_sales_order_items'
@@ -61,3 +78,4 @@ class UniversalSalesOrderItem(Base):
     unit_price = mapped_column(Numeric(15, 2), nullable=False)
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
+    order = relationship("UniversalSalesOrder", back_populates="items")

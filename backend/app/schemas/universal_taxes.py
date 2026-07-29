@@ -22,6 +22,7 @@ class UniversalTaxConfigurationBase(BaseModel):
     cgst_rate: float = Field(0.0, ge=0)
     sgst_rate: float = Field(0.0, ge=0)
     igst_rate: float = Field(0.0, ge=0)
+    reverse_charge_applicable: bool = False
     is_active: bool = True
 
 class UniversalTaxConfigurationCreate(UniversalTaxConfigurationBase):
@@ -32,6 +33,7 @@ class UniversalTaxConfigurationUpdate(BaseModel):
     cgst_rate: float | None = Field(None, ge=0)
     sgst_rate: float | None = Field(None, ge=0)
     igst_rate: float | None = Field(None, ge=0)
+    reverse_charge_applicable: bool | None = None
     is_active: bool | None = None
 
 class UniversalTaxConfigurationResponse(UniversalTaxConfigurationBase):

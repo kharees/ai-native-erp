@@ -12,6 +12,11 @@ class UniversalTaxConfiguration(Base):
     cgst_rate = mapped_column(Numeric(5, 2), nullable=False, server_default=text('0.00'))
     sgst_rate = mapped_column(Numeric(5, 2), nullable=False, server_default=text('0.00'))
     igst_rate = mapped_column(Numeric(5, 2), nullable=False, server_default=text('0.00'))
+    # Reverse charge mechanism: when true, the recipient (not this seller)
+    # is liable to pay GST directly to the government on invoices using
+    # this tax configuration -- a legal flag that must be printed on the
+    # invoice PDF (see app/services/invoice_pdf.py), not itemized-tax logic.
+    reverse_charge_applicable = mapped_column(Boolean(), nullable=False, server_default=text('FALSE'))
     is_active = mapped_column(Boolean(), nullable=False, server_default=text('TRUE'))
     created_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))
     updated_at = mapped_column(DateTime(timezone=True), nullable=False, server_default=text('now()'))

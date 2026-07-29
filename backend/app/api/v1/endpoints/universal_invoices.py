@@ -1,6 +1,6 @@
 import uuid
 from typing import Annotated
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
@@ -9,6 +9,7 @@ from app.schemas import universal_invoices as schemas
 from app.middleware.tenant_auth import TenantIDDep
 from app.middleware.rbac import RequirePermission
 from app.services.idempotency import claim_idempotency_key, complete_idempotency_key
+from app.services.invoice_pdf import generate_invoice_pdf
 
 router = APIRouter()
 DBDep = Annotated[AsyncSession, Depends(get_db)]
@@ -70,3 +71,15 @@ async def get_tax_invoice(id: uuid.UUID, tenant_id: TenantIDDep, db: DBDep):
     obj = await crud.get_tax_invoice(db, tenant_id, id)
     if not obj: raise _not_found("Tax Invoice", id)
     return obj
+
+@router.get("/tax/{id}/pdf", dependencies=[Depends(RequirePermission("UniversalBilling", "Invoices", "Read"))])
+async def get_tax_invoice_pdf(id: uuid.UUID, tenant_id: TenantIDDep, db: DBDep):
+    try:
+        pdf_bytes = await generate_invoice_pdf(db, tenant_id, id)
+    except ValueError:
+        raise _not_found("Tax Invoice", id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="invoice-{id}.pdf"'},
+    )

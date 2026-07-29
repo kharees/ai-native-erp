@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,8 +40,16 @@ class UniversalCustomerPriceListResponse(UniversalCustomerPriceListBase):
 # Sales Quotation Item
 class UniversalSalesQuotationItemBase(BaseModel):
     item_id: uuid.UUID
+    # quantity is Numeric(15, 4) on the DB side but deliberately stays
+    # float, not Decimal -- it's a physical quantity, not money (same
+    # convention as schemas/universal_invoices.py's item quantity field).
     quantity: float = Field(..., gt=0)
-    unit_price: float = Field(..., ge=0)
+    # Decimal, matching UniversalSalesQuotationItem.unit_price's
+    # Numeric(15, 2) column exactly -- money must never pass through a
+    # Python float (binary floating point can't represent most base-10
+    # fractions exactly). Same convention as schemas/sales_fulfillment.py's
+    # QuotationLineItem.unit_price and schemas/universal_invoices.py.
+    unit_price: Decimal = Field(..., ge=0, max_digits=15, decimal_places=2)
 
 class UniversalSalesQuotationItemCreate(UniversalSalesQuotationItemBase):
     pass
@@ -59,7 +68,10 @@ class UniversalSalesQuotationBase(BaseModel):
     quotation_number: str = Field(..., max_length=64)
     status: str = Field("DRAFT", max_length=32)
     valid_until: datetime | None = None
-    total_amount: float = Field(0.0, ge=0)
+    # Decimal, matching UniversalSalesQuotation.total_amount's
+    # Numeric(15, 2) column exactly -- see UniversalSalesQuotationItemBase.
+    # unit_price above for the full rationale.
+    total_amount: Decimal = Field(Decimal("0.00"), ge=0, max_digits=15, decimal_places=2)
 
 class UniversalSalesQuotationCreate(UniversalSalesQuotationBase):
     items: list[UniversalSalesQuotationItemCreate]
@@ -75,6 +87,7 @@ class UniversalSalesQuotationResponse(UniversalSalesQuotationBase):
     revision_number: int
     created_at: datetime
     updated_at: datetime
+    items: list[UniversalSalesQuotationItemResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
 # Sales Order Item
@@ -115,4 +128,5 @@ class UniversalSalesOrderResponse(UniversalSalesOrderBase):
     tenant_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    items: list[UniversalSalesOrderItemResponse] = []
     model_config = ConfigDict(from_attributes=True)

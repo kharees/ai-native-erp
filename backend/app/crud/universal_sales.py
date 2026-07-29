@@ -1,5 +1,6 @@
 import uuid
 from sqlalchemy import select, func, update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.universal_sales import (
     UniversalSalesQuotation, UniversalSalesQuotationItem, UniversalSalesOrder, UniversalSalesOrderItem
@@ -22,19 +23,28 @@ async def create_quotation(db: AsyncSession, tenant_id: uuid.UUID, payload: Univ
         
     await db.flush()
     await db.refresh(obj)
+    await db.refresh(obj, ["items"])
     return obj
 
 async def list_quotations(db: AsyncSession, tenant_id: uuid.UUID, limit: int, offset: int):
-    stmt = select(UniversalSalesQuotation).where(UniversalSalesQuotation.tenant_id == tenant_id)
+    stmt = (
+        select(UniversalSalesQuotation)
+        .options(selectinload(UniversalSalesQuotation.items))
+        .where(UniversalSalesQuotation.tenant_id == tenant_id)
+    )
     count_stmt = select(func.count(UniversalSalesQuotation.id)).where(UniversalSalesQuotation.tenant_id == tenant_id)
     total = (await db.execute(count_stmt)).scalar_one()
-    
     stmt = stmt.order_by(UniversalSalesQuotation.created_at.desc()).limit(limit).offset(offset)
     items = (await db.execute(stmt)).scalars().all()
     return items, total
 
 async def get_quotation(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> UniversalSalesQuotation | None:
-    return (await db.execute(select(UniversalSalesQuotation).where(UniversalSalesQuotation.id == id, UniversalSalesQuotation.tenant_id == tenant_id))).scalar_one_or_none()
+    stmt = (
+        select(UniversalSalesQuotation)
+        .options(selectinload(UniversalSalesQuotation.items))
+        .where(UniversalSalesQuotation.id == id, UniversalSalesQuotation.tenant_id == tenant_id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 async def create_order(db: AsyncSession, tenant_id: uuid.UUID, payload: UniversalSalesOrderCreate) -> UniversalSalesOrder:
     dump = payload.model_dump()
@@ -49,19 +59,28 @@ async def create_order(db: AsyncSession, tenant_id: uuid.UUID, payload: Universa
         
     await db.flush()
     await db.refresh(obj)
+    await db.refresh(obj, ["items"])
     return obj
 
 async def list_orders(db: AsyncSession, tenant_id: uuid.UUID, limit: int, offset: int):
-    stmt = select(UniversalSalesOrder).where(UniversalSalesOrder.tenant_id == tenant_id)
+    stmt = (
+        select(UniversalSalesOrder)
+        .options(selectinload(UniversalSalesOrder.items))
+        .where(UniversalSalesOrder.tenant_id == tenant_id)
+    )
     count_stmt = select(func.count(UniversalSalesOrder.id)).where(UniversalSalesOrder.tenant_id == tenant_id)
     total = (await db.execute(count_stmt)).scalar_one()
-    
     stmt = stmt.order_by(UniversalSalesOrder.created_at.desc()).limit(limit).offset(offset)
     items = (await db.execute(stmt)).scalars().all()
     return items, total
 
 async def get_order(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> UniversalSalesOrder | None:
-    return (await db.execute(select(UniversalSalesOrder).where(UniversalSalesOrder.id == id, UniversalSalesOrder.tenant_id == tenant_id))).scalar_one_or_none()
+    stmt = (
+        select(UniversalSalesOrder)
+        .options(selectinload(UniversalSalesOrder.items))
+        .where(UniversalSalesOrder.id == id, UniversalSalesOrder.tenant_id == tenant_id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 async def convert_from_quote(db: AsyncSession, tenant_id: uuid.UUID, quote_id: uuid.UUID) -> UniversalSalesOrder | None:
     quote = await get_quotation(db, tenant_id, quote_id)
@@ -93,6 +112,7 @@ async def convert_from_quote(db: AsyncSession, tenant_id: uuid.UUID, quote_id: u
     quote.status = 'CONVERTED'
     await db.flush()
     await db.refresh(order)
+    await db.refresh(order, ["items"])
     return order
 
 async def approve_order(db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID) -> UniversalSalesOrder | None:
@@ -102,6 +122,7 @@ async def approve_order(db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.U
     order.status = 'CONFIRMED'
     await db.flush()
     await db.refresh(order)
+    await db.refresh(order, ["items"])
     return order
 
 from app.models.universal_sales import UniversalCustomerPriceList
@@ -121,3 +142,23 @@ async def list_price_lists(db: AsyncSession, tenant_id: uuid.UUID, limit: int, o
 
 async def get_price_list(db: AsyncSession, tenant_id: uuid.UUID, id: uuid.UUID) -> UniversalCustomerPriceList | None:
     return (await db.execute(select(UniversalCustomerPriceList).where(UniversalCustomerPriceList.id == id, UniversalCustomerPriceList.tenant_id == tenant_id))).scalar_one_or_none()
+
+
+async def get_price_for_item(
+    db: AsyncSession, tenant_id: uuid.UUID, item_id: uuid.UUID, customer_group_id: uuid.UUID | None,
+) -> float | None:
+    """Looks up an item's price for a customer group -- UniversalCustomerPriceList
+    is keyed by (customer_group_id, item_id), not by individual customer.
+    Returns None (never a fabricated/default price) when customer_group_id
+    is None or no matching row exists -- callers (e.g. app/services/
+    order_capture.py) must treat that as "no price available", not
+    "price is free"."""
+    if customer_group_id is None:
+        return None
+    stmt = select(UniversalCustomerPriceList.price).where(
+        UniversalCustomerPriceList.tenant_id == tenant_id,
+        UniversalCustomerPriceList.customer_group_id == customer_group_id,
+        UniversalCustomerPriceList.item_id == item_id,
+    )
+    price = (await db.execute(stmt)).scalar_one_or_none()
+    return float(price) if price is not None else None
