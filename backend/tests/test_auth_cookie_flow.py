@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import insert
+from sqlalchemy import insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_password_hash
@@ -87,6 +87,29 @@ async def test_refresh_uses_cookie_not_body(async_client: AsyncClient, db_sessio
     assert refresh_body["refresh_token"] is None
     # Cookie rotated — still present, still httpOnly.
     assert refresh_resp.cookies.get("refresh_token") is not None
+
+
+async def test_refresh_never_silently_drops_tenant_id(async_client: AsyncClient, db_session: AsyncSession):
+    """Regression: unlike /auth/login (see test_auth_middleware.py's
+    test_real_login_response_always_yields_a_usable_tenant_id), /auth/refresh
+    used to derive tenant_id from a fresh UserProfile lookup and silently set
+    it to None -- with no error, no log -- whenever that lookup found nothing
+    (e.g. UserProfile.is_active flips false mid-session). Since bootstrapAuth()
+    calls /auth/refresh on every hard page reload, that produced a valid-looking
+    200 response carrying a tenant-less access token, which then 403'd on every
+    subsequent request across the whole app ("No tenant_id claim found").
+    Refresh must fail loudly instead of minting a broken session.
+    """
+    tenant_id, email = await _create_login_user(db_session)
+    login_resp = await async_client.post("/api/v1/auth/login", json={"email": email, "password": _PASSWORD})
+    assert login_resp.status_code == 200
+
+    await db_session.execute(update(UserProfile).where(UserProfile.tenant_id == tenant_id).values(is_active=False))
+    await db_session.commit()
+
+    refresh_resp = await async_client.post("/api/v1/auth/refresh")
+    assert refresh_resp.status_code == 401
+    assert "log in again" in refresh_resp.json().get("detail", "").lower()
 
 
 async def test_refresh_without_cookie_rejected(async_client: AsyncClient):

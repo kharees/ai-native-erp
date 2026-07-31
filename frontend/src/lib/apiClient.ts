@@ -98,7 +98,7 @@ const apiClient: AxiosInstance = axios.create({
 // 4.  Request interceptor — inject X-Tenant-ID
 // =============================================================================
 
-import { useAuthStore } from '@/store/authStore'
+import { useAuthStore, type User } from '@/store/authStore'
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
@@ -122,20 +122,35 @@ apiClient.interceptors.request.use(
 // 5.  Silent refresh on 401 — retried once via the httpOnly refresh cookie
 // =============================================================================
 
+/** Result of a successful /auth/refresh call — the access token AND the
+ * user profile that came with it, so a caller bootstrapping a session from
+ * scratch (see authStore.ts's bootstrapAuth, which never has a cached
+ * accessToken to start from now that it's memory-only) doesn't need a
+ * second round-trip just to learn who's logged in. */
+export interface RefreshResult {
+  accessToken: string
+  user: User
+}
+
 /**
  * Concurrent requests that all 401 around the same time (e.g. a dashboard
  * firing several parallel widget calls right as the access token expires)
  * must not each independently call /auth/refresh — that would race
  * multiple refresh-cookie rotations against each other. This coalesces
  * them into one in-flight refresh that every caller awaits.
+ *
+ * Exported (not module-private) so authStore.ts's bootstrapAuth can reuse
+ * the exact same call — and the exact same de-duplication — for the
+ * initial silent-refresh-on-app-load flow, instead of re-implementing a
+ * second, parallel path to the same endpoint.
  */
-let _refreshPromise: Promise<string | null> | null = null
+let _refreshPromise: Promise<RefreshResult | null> | null = null
 
-async function _refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<RefreshResult | null> {
   if (!_refreshPromise) {
     _refreshPromise = axios
       .post(`${BASE_URL}/api/v1/auth/refresh`, null, { withCredentials: true })
-      .then((res) => res.data.access_token as string)
+      .then((res) => ({ accessToken: res.data.access_token as string, user: res.data.user as User }))
       .catch(() => null)
       .finally(() => {
         _refreshPromise = null
@@ -157,19 +172,47 @@ apiClient.interceptors.response.use(
     const isAuthEndpoint = originalRequest?.url?.includes('/api/v1/auth/login')
       || originalRequest?.url?.includes('/api/v1/auth/refresh')
 
-    if (status === 401 && originalRequest && !originalRequest._retried && !isAuthEndpoint) {
+    // TenantAuthMiddleware returns this specific 403 (not 401) when the
+    // access token carries no tenant_id claim at all — e.g. a token minted
+    // before /auth/refresh guaranteed one. It's recoverable the same way a
+    // 401 is: a fresh /auth/refresh call either mints a good token or fails
+    // cleanly, so route it through the exact same silent-refresh-then-logout
+    // path below rather than leaving the caller to render a raw backend
+    // error (see: Warehouses/Dashboard/Purchase Orders all showing this
+    // verbatim string instead of being bounced to /login).
+    const isMissingTenantClaim = status === 403
+      && typeof error.response?.data?.detail === 'string'
+      && error.response.data.detail.includes('No tenant_id claim found')
+
+    if ((status === 401 || isMissingTenantClaim) && originalRequest && !originalRequest._retried && !isAuthEndpoint) {
       originalRequest._retried = true
-      const newAccessToken = await _refreshAccessToken()
-      if (newAccessToken) {
-        useAuthStore.getState().setAccessToken(newAccessToken)
+      const refreshed = await refreshAccessToken()
+      if (refreshed) {
+        useAuthStore.getState().setAccessToken(refreshed.accessToken)
         originalRequest.headers = originalRequest.headers ?? {}
-        originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
+        originalRequest.headers['Authorization'] = `Bearer ${refreshed.accessToken}`
         return apiClient(originalRequest)
       }
-      // Refresh failed (cookie missing/expired/revoked) — the session is
-      // truly over, not just the access token stale. Clear local state so
-      // the UI reflects "logged out" instead of silently retrying forever.
+      // Refresh failed (cookie missing/expired/revoked, or — e.g. after a
+      // SECRET_KEY rotation — the refresh token itself no longer verifies
+      // either) — the session is truly over, not just the access token
+      // stale. Clear local state so the UI reflects "logged out" instead
+      // of silently retrying forever.
       useAuthStore.getState().logout()
+
+      // Redirect immediately and unconditionally, rather than relying on
+      // AuthGuard's useEffect (subscribed to isAuthenticated) to notice
+      // the state change on its next render. That reactive path does
+      // still fire, but only after whichever component made this failed
+      // call has already re-rendered with a caught error — a dashboard's
+      // Promise.all() catch block sets its own error state and paints a
+      // broken/zeroed page for one render before the redirect lands. A
+      // hard navigation here, fired the moment the session is confirmed
+      // dead, pre-empts that: the browser starts leaving the page before
+      // any caller's .catch() even finishes running.
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login?reason=session_expired'
+      }
     }
 
     const body = error.response?.data

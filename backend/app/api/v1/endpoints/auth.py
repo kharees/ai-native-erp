@@ -214,7 +214,18 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
     prof_result = await db.execute(prof_stmt)
     user_profile = prof_result.scalar_one_or_none()
 
-    tenant_id = str(user_profile.tenant_id) if user_profile else None
+    if not user_profile:
+        # Never silently mint a tenant-less access token here -- unlike
+        # /auth/login (which fails the same way), this endpoint is called
+        # automatically on every page load via bootstrapAuth(), so a silent
+        # None would turn into "No tenant_id claim found" 403s across the
+        # entire app instead of a clean prompt to log back in.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unable to resolve tenant for this session. Please log in again.",
+        )
+
+    tenant_id = str(user_profile.tenant_id)
 
     # Carry the session_id forward so a revoked session cannot be resurrected
     # by refreshing — a refresh token minted before revocation must not be
@@ -229,22 +240,21 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
 
     jwt_data = {
         "sub": str(user_account.id),
-        "email": user_account.email
+        "email": user_account.email,
+        "app_metadata": {"tenant_id": tenant_id},
     }
-    if tenant_id:
-        jwt_data["app_metadata"] = {"tenant_id": tenant_id}
     if session_id:
         jwt_data["session_id"] = session_id
 
     new_access = create_access_token(data=jwt_data)
     new_refresh = create_refresh_token(data=jwt_data)
-    
+
     user_info = {
         "id": str(user_account.id),
         "email": user_account.email,
         "tenant_id": tenant_id,
-        "first_name": user_profile.first_name if user_profile else None,
-        "last_name": user_profile.last_name if user_profile else None
+        "first_name": user_profile.first_name,
+        "last_name": user_profile.last_name
     }
 
     # Rotate the cookie on every refresh (new refresh token, new expiry).
