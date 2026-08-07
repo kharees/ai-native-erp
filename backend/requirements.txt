@@ -49,6 +49,15 @@ openpyxl==3.1.2
 thefuzz==0.22.1
 python-Levenshtein==0.27.3
 
+# --- PDF Generation (GST tax invoices, app/services/invoice_pdf.py) ---
+reportlab==5.0.0
+
+# --- PDF -> image rasterization (vendor delivery-note capture, see
+# app/services/vendor_capture.py) -- pure-wheel, no external poppler
+# binary required (unlike pdf2image), so it works the same in any
+# environment this app runs in without an extra system package. ---
+PyMuPDF==1.24.9
+
 # --- Dev / Testing ---
 pytest==8.2.2
 pytest-asyncio==0.23.7
